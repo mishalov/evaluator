@@ -3,6 +3,11 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  schedule:
+    # Daily refresh at 06:30 UTC — fetches fresh ECB / World Bank data and
+    # redeploys so the bundled snapshot stays current. Cron times :00 and :30
+    # are heavily contested across GH Actions; offset slightly.
+    - cron: '37 6 * * *'
   workflow_dispatch:
 
 permissions:
@@ -29,6 +34,9 @@ jobs:
 
       - run: npm test
 
+      # `npm run build` runs `prebuild` (fetch-market-data.mjs) automatically.
+      # The script is fail-soft: if a source is unreachable, it reuses the
+      # previous snapshot rather than blocking the build.
       - run: npm run build
 
       - uses: actions/configure-pages@v5

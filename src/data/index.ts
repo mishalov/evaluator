@@ -3,57 +3,78 @@
  *
  * Public data layer API.
  *
- * Fetches live CPI and FX data with stale-while-revalidate caching.
- * Falls back to bundled defaults on any failure.
+ * Source priority:
+ *   1. Build-time snapshot (src/data/snapshot.json, refreshed daily by CI)
+ *   2. localStorage cache (within TTL or 90-day grace window)
+ *   3. DEFAULT_MARKET_DATA (last-resort placeholder)
+ *
+ * No runtime cross-origin fetches — GitHub Pages friendly.
  *
  * INVARIANT: This function NEVER throws. It always returns a valid MarketData.
- *
- * Source priority: live > cached > fallback
  */
 import type { MarketData } from '../engine/types'
 import { DEFAULT_MARKET_DATA } from './defaults'
-import { fetchCpiRate } from './worldbank'
-import { fetchFxRates } from './ecb'
-import { readCache } from './cache'
+import { readCache, readCacheWithGrace, writeCache, CPI_TTL_MS, FX_TTL_MS } from './cache'
+import {
+  getSnapshotFxRates,
+  getSnapshotCpi,
+  getSnapshotFetchedAt,
+} from './snapshot'
 
 /**
  * Load market data for a given country.
  *
- * Attempts live fetches in parallel; on any failure, falls back to
- * cached data, then to bundled defaults.
+ * Reads the bundled build-time snapshot first. Falls back to localStorage
+ * cache (a previous good snapshot saved during a prior visit), then to
+ * DEFAULT_MARKET_DATA.
  *
- * @param countryCode  ISO 3166-1 alpha-2 code (e.g. "US")
- * @returns MarketData with source tag indicating origin
+ * @param countryCode  ISO 3166-1 alpha-2 code (e.g. "CZ")
  */
 export async function loadMarketData(countryCode: string): Promise<MarketData> {
   try {
-    const [cpiRate, fxRates] = await Promise.all([
-      fetchCpiRate(countryCode).catch(() => null),
-      fetchFxRates().catch(() => null),
-    ])
+    const fxFromSnapshot = getSnapshotFxRates()
+    const cpiFromSnapshot = getSnapshotCpi(countryCode)
 
-    // Check what we actually got
-    const hasCpi = cpiRate !== null
-    const hasFx = fxRates !== null
+    // The snapshot at minimum contains EUR=1; treat anything richer as usable.
+    const snapshotHasFx = Object.keys(fxFromSnapshot).length > 1
+    const snapshotHasCpi = cpiFromSnapshot !== null
 
-    if (hasCpi && hasFx) {
+    if (snapshotHasFx && snapshotHasCpi) {
+      // Cache the snapshot values too, so a subsequent visit with a stale
+      // (but valid) older bundle still has data if the user opens an old tab.
+      writeCache('fx:ecb', fxFromSnapshot, FX_TTL_MS)
+      writeCache(`cpi:${countryCode}`, cpiFromSnapshot, CPI_TTL_MS)
       return {
-        cpiAnnual: cpiRate,
-        fxRates,
+        cpiAnnual: cpiFromSnapshot,
+        fxRates: fxFromSnapshot,
         source: 'live',
-        fetchedAt: new Date().toISOString(),
+        fetchedAt: getSnapshotFetchedAt(),
       }
     }
 
-    // Partial live data — fill gaps from cache/defaults
-    const cachedCpi = readCache<number>(`cpi:${countryCode}`, true)
-    const cachedFx = readCache<Record<string, number>>('fx:ecb', true)
+    // Snapshot was incomplete — fill gaps from cache, then defaults.
+    const cachedCpi =
+      readCache<number>(`cpi:${countryCode}`) ??
+      readCacheWithGrace<number>(`cpi:${countryCode}`)
+    const cachedFx =
+      readCache<Record<string, number>>('fx:ecb') ??
+      readCacheWithGrace<Record<string, number>>('fx:ecb')
 
-    const finalCpi = cpiRate ?? cachedCpi ?? DEFAULT_MARKET_DATA.cpiAnnual
-    const finalFx = fxRates ?? cachedFx ?? DEFAULT_MARKET_DATA.fxRates
+    const finalCpi =
+      (snapshotHasCpi ? cpiFromSnapshot : null) ??
+      cachedCpi ??
+      DEFAULT_MARKET_DATA.cpiAnnual
+    const finalFx =
+      (snapshotHasFx ? fxFromSnapshot : null) ??
+      cachedFx ??
+      DEFAULT_MARKET_DATA.fxRates
 
-    const source: MarketData['source'] =
-      (hasCpi || cachedCpi !== null) && (hasFx || cachedFx !== null)
+    const usedSnapshot = snapshotHasFx || snapshotHasCpi
+    const usedCache = (!snapshotHasFx && cachedFx !== null) || (!snapshotHasCpi && cachedCpi !== null)
+
+    const source: MarketData['source'] = usedSnapshot
+      ? 'live'
+      : usedCache
         ? 'cached'
         : 'fallback'
 
@@ -61,7 +82,7 @@ export async function loadMarketData(countryCode: string): Promise<MarketData> {
       cpiAnnual: finalCpi,
       fxRates: finalFx,
       source,
-      fetchedAt: new Date().toISOString(),
+      fetchedAt: usedSnapshot ? getSnapshotFetchedAt() : new Date().toISOString(),
     }
   } catch {
     return { ...DEFAULT_MARKET_DATA, fetchedAt: new Date().toISOString() }
@@ -71,12 +92,6 @@ export async function loadMarketData(countryCode: string): Promise<MarketData> {
 /**
  * Convert a monetary value from one currency to another using ECB cross-rates.
  * Uses EUR as intermediate.
- *
- * @param amount       Amount in `fromCurrency`
- * @param fromCurrency ISO 4217 code
- * @param toCurrency   ISO 4217 code
- * @param fxRates      Rate map (units per EUR)
- * @returns Converted amount in `toCurrency`
  */
 export function convertCurrency(
   amount: number,
@@ -87,7 +102,6 @@ export function convertCurrency(
   if (fromCurrency === toCurrency) return amount
   const fromRate = fxRates[fromCurrency] ?? 1
   const toRate = fxRates[toCurrency] ?? 1
-  // amount in EUR = amount / fromRate; amount in toCurrency = amountEur * toRate
   return (amount / fromRate) * toRate
 }
 

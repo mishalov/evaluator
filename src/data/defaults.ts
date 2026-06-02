@@ -44,6 +44,7 @@ export const SUPPORTED_COUNTRIES = [
   { code: 'CA', name: 'Canada' },
   { code: 'AU', name: 'Australia' },
   { code: 'CH', name: 'Switzerland' },
+  { code: 'CZ', name: 'Czech Republic' },
   { code: 'SE', name: 'Sweden' },
   { code: 'NZ', name: 'New Zealand' },
 ]

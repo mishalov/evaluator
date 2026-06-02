@@ -5,6 +5,7 @@
  */
 import type { CashBlock } from '../../engine/types'
 import { useEvaluatorStore } from '../../state/store'
+import { useCurrencySymbol } from '../hooks/useCurrencySymbol'
 
 interface Props {
   block: CashBlock
@@ -13,6 +14,7 @@ interface Props {
 
 export function CashBlockForm({ block, scenarioId }: Props) {
   const updateBlock = useEvaluatorStore((s) => s.updateBlock)
+  const sym = useCurrencySymbol()
 
   const update = (changes: Partial<CashBlock>) =>
     updateBlock(scenarioId, block.id, changes)
@@ -22,7 +24,7 @@ export function CashBlockForm({ block, scenarioId }: Props) {
       <h4 className="font-medium text-gray-700 text-sm">{block.label}</h4>
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
-          <span className="text-xs text-gray-500">Initial Balance ($)</span>
+          <span className="text-xs text-gray-500">Initial Balance ({sym})</span>
           <input
             type="number"
             className="mt-1 block w-full rounded border-gray-300 shadow-sm text-sm px-2 py-1 border focus:ring-blue-500 focus:border-blue-500"
@@ -32,7 +34,7 @@ export function CashBlockForm({ block, scenarioId }: Props) {
           />
         </label>
         <label className="block">
-          <span className="text-xs text-gray-500">Monthly Contribution ($)</span>
+          <span className="text-xs text-gray-500">Monthly Contribution ({sym})</span>
           <input
             type="number"
             className="mt-1 block w-full rounded border-gray-300 shadow-sm text-sm px-2 py-1 border focus:ring-blue-500 focus:border-blue-500"

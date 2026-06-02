@@ -6,6 +6,7 @@
  */
 import type { RentBlock } from '../../engine/types'
 import { useEvaluatorStore } from '../../state/store'
+import { useCurrencySymbol } from '../hooks/useCurrencySymbol'
 
 interface Props {
   block: RentBlock
@@ -14,6 +15,7 @@ interface Props {
 
 export function RentBlockForm({ block, scenarioId }: Props) {
   const updateBlock = useEvaluatorStore((s) => s.updateBlock)
+  const sym = useCurrencySymbol()
   const scenario = useEvaluatorStore((s) =>
     s.appState.scenarios.find((sc) => sc.id === scenarioId),
   )
@@ -33,7 +35,7 @@ export function RentBlockForm({ block, scenarioId }: Props) {
       <h4 className="font-medium text-gray-700 text-sm">{block.label}</h4>
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
-          <span className="text-xs text-gray-500">Monthly Rent ($)</span>
+          <span className="text-xs text-gray-500">Monthly Rent ({sym})</span>
           <input
             type="number"
             className="mt-1 block w-full rounded border-gray-300 shadow-sm text-sm px-2 py-1 border"
@@ -78,7 +80,7 @@ export function RentBlockForm({ block, scenarioId }: Props) {
       {block.differentialInvesting && (
         <label className="block">
           <span className="text-xs text-gray-500">
-            Reference Monthly P+I ($)
+            Reference Monthly P+I ({sym})
             <span className="ml-1 text-gray-400">
               (leave blank to use sibling mortgage block's payment)
             </span>

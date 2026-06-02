@@ -7,6 +7,8 @@
 import type { MortgageBlock } from '../../engine/types'
 import { useEvaluatorStore } from '../../state/store'
 import { monthlyPayment } from '../../engine/math/mortgage'
+import { formatCurrency } from '../../lib/formatCurrency'
+import { useCurrencySymbol } from '../hooks/useCurrencySymbol'
 
 interface Props {
   block: MortgageBlock
@@ -15,6 +17,8 @@ interface Props {
 
 export function MortgageBlockForm({ block, scenarioId }: Props) {
   const updateBlock = useEvaluatorStore((s) => s.updateBlock)
+  const currency = useEvaluatorStore((s) => s.appState.currency)
+  const sym = useCurrencySymbol()
   const update = (changes: Partial<MortgageBlock>) =>
     updateBlock(scenarioId, block.id, changes)
 
@@ -31,8 +35,8 @@ export function MortgageBlockForm({ block, scenarioId }: Props) {
 
       {/* Summary banner */}
       <div className="bg-blue-50 rounded p-2 text-xs text-blue-700">
-        <span>Monthly P+I: <strong>${M.toFixed(2)}</strong></span>
-        <span className="ml-3">Loan: <strong>${loanAmount.toLocaleString()}</strong></span>
+        <span>Monthly P+I: <strong>{formatCurrency(M, currency)}</strong></span>
+        <span className="ml-3">Loan: <strong>{formatCurrency(loanAmount, currency)}</strong></span>
         <span className="ml-3" title="M_ref = P+I only (excludes tax and maintenance). Used as reference for differential investing in rent scenarios.">
           M_ref = P+I only
         </span>
@@ -40,7 +44,7 @@ export function MortgageBlockForm({ block, scenarioId }: Props) {
 
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
-          <span className="text-xs text-gray-500">Property Value ($)</span>
+          <span className="text-xs text-gray-500">Property Value ({sym})</span>
           <input
             type="number"
             className="mt-1 block w-full rounded border-gray-300 shadow-sm text-sm px-2 py-1 border"
@@ -50,7 +54,7 @@ export function MortgageBlockForm({ block, scenarioId }: Props) {
           />
         </label>
         <label className="block">
-          <span className="text-xs text-gray-500">Down Payment ($) ({downPct}%)</span>
+          <span className="text-xs text-gray-500">Down Payment ({sym}) ({downPct}%)</span>
           <input
             type="number"
             className="mt-1 block w-full rounded border-gray-300 shadow-sm text-sm px-2 py-1 border"

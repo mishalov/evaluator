@@ -6,6 +6,7 @@
  */
 import type { SalaryConfig } from '../../engine/types'
 import { useEvaluatorStore } from '../../state/store'
+import { useCurrencySymbol } from '../hooks/useCurrencySymbol'
 
 interface Props {
   salary: SalaryConfig
@@ -14,6 +15,7 @@ interface Props {
 
 export function SalaryPanel({ salary, scenarioId }: Props) {
   const updateScenario = useEvaluatorStore((s) => s.updateScenario)
+  const sym = useCurrencySymbol()
 
   const update = (changes: Partial<SalaryConfig>) =>
     updateScenario(scenarioId, { salary: { ...salary, ...changes } })
@@ -32,7 +34,7 @@ export function SalaryPanel({ salary, scenarioId }: Props) {
       </p>
       <div className="grid grid-cols-3 gap-3">
         <label className="block">
-          <span className="text-xs text-gray-500">Annual Gross ($)</span>
+          <span className="text-xs text-gray-500">Annual Gross ({sym})</span>
           <input
             type="number"
             className="mt-1 block w-full rounded border-gray-300 shadow-sm text-sm px-2 py-1 border"
