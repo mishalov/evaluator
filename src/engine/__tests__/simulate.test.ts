@@ -165,10 +165,11 @@ describe('Buy-only scenario', () => {
     const nw = result.summary.finalNetWorthNominal
 
     // After 30y: mortgage paid off, $300k house appreciates at 4% → ~$973k
-    // Plus cash savings $0 + $200/mo @ 5% for 30y ≈ $166k
-    // Net worth ≈ $973k + $166k ≈ $1.14M
-    expect(nw).toBeGreaterThan(1_000_000)
-    expect(nw).toBeLessThan(1_300_000)
+    // Plus cash savings starts at -$60k (down payment debited from $0 initial)
+    // and grows with $200/mo contributions @ 5% → ~ -$102k
+    // Net worth ≈ $973k - $102k ≈ $871k
+    expect(nw).toBeGreaterThan(850_000)
+    expect(nw).toBeLessThan(900_000)
   })
 
   it('mortgage is fully paid off at horizon', () => {
@@ -186,6 +187,14 @@ describe('Buy-only scenario', () => {
   it('has positive total interest paid', () => {
     const result = simulate(BUY_ONLY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
     expect(result.summary.totalInterest).toBeGreaterThan(100_000)
+  })
+
+  it('debits the down payment from cash at month 0', () => {
+    const result = simulate(BUY_ONLY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    // initialBalance=0, downPayment=60_000 → month-0 cash = -60_000
+    expect(result.monthly[0].cashBalance).toBeCloseTo(-60_000, 4)
+    // Net worth at month 0 = -60_000 (cash) + (300_000 - 240_000) (equity) = 0
+    expect(result.monthly[0].netWorth).toBeCloseTo(0, 4)
   })
 })
 
@@ -301,8 +310,10 @@ describe('Simulation correctness', () => {
     for (const s of scenarios) {
       const result = simulate(s, HORIZON_YEARS, CPI_ANNUAL)
       for (const p of result.monthly) {
-        // Cash balance should always be >= 0 with our config
-        expect(p.cashBalance).toBeGreaterThanOrEqual(0)
+        // netWorth (not cashBalance) must stay non-negative — buy-only's cash
+        // starts negative because the down payment is debited from $0 initial,
+        // but the corresponding property equity offsets it so net worth ≥ 0.
+        expect(p.netWorth).toBeGreaterThanOrEqual(-0.01)
       }
     }
   })

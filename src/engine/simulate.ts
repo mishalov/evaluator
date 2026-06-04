@@ -28,6 +28,15 @@
  * strategies, not personal budgets. Routing salary would require modelling
  * spending, which is out of scope. Any future change to route salary into
  * the cash block must be an intentional feature addition, not a silent fix.
+ *
+ * --- DOWN-PAYMENT DEBIT (architect, 2026) ---
+ * When a scenario contains both a MortgageBlock and a CashBlock, the
+ * mortgage's downPayment is debited from the cash block at month 0
+ * (before the month-0 snapshot). This avoids double-counting: previously
+ * the down payment reduced the loan principal but was not removed from
+ * cash, so net worth = cash + (propertyValue - mortgageBalance) included
+ * the down payment twice. We do NOT clamp at zero — a negative cash
+ * balance is a meaningful signal that the scenario is under-funded.
  */
 import { Scenario, SimulationResult, MonthlyPoint, SimulationSummary } from './types'
 import { cpiIndex } from './math/inflation'
@@ -79,6 +88,22 @@ export function simulate(
     ? initMortgageBlockState(mortgageBlock)
     : null
   let rentState: RentBlockState | null = rentBlock ? initRentBlockState() : null
+
+  // Down-payment debit. Mortgage init takes downPayment off the loan principal,
+  // so the cash block must shed it from its balance to avoid double-counting.
+  // No clamping — negative cash is a meaningful signal of an under-funded scenario.
+  //
+  // We deliberately do NOT debit totalContributions: the down payment is a
+  // withdrawal of capital, not a reversal of a prior contribution. Reducing
+  // the cost basis here would inflate capital-gains tax at horizon by treating
+  // already-taxed principal as taxable gain. (See capitalGainsTax in
+  // engine/math/compound.ts: gains = balance - totalContributions.)
+  if (mortgageBlock && cashBlock) {
+    cashState = {
+      balance: cashState.balance - mortgageBlock.downPayment,
+      totalContributions: cashState.totalContributions,
+    }
+  }
 
   // Determine M_ref for differential investing:
   // Use referenceMonthlyPayment if explicitly set, otherwise use sibling mortgage's PI

@@ -48,7 +48,7 @@ export interface MortgageBlock {
   label: string
   /** Total property purchase price */
   propertyValue: number
-  /** Down payment (reduces loan principal). Treated as out-of-band lump-sum. */
+  /** Down payment (reduces loan principal). Debited from the sibling CashBlock at month 0. */
   downPayment: number
   /** Annual mortgage interest rate as a decimal (e.g. 0.06 for 6%) */
   annualInterestRate: number

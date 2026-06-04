@@ -7,7 +7,7 @@
 import { useEvaluatorStore } from './state/store'
 import { useScenarios } from './state/selectors'
 import { useExternalData } from './ui/hooks/useExternalData'
-import { NetWorthChart } from './ui/charts/NetWorthChart'
+import { NetWorthSection } from './ui/charts/NetWorthSection'
 import { SummaryTable } from './ui/charts/SummaryTable'
 import { ScenarioColumn } from './ui/components/ScenarioColumn'
 import { RealNominalToggle } from './ui/components/RealNominalToggle'
@@ -44,7 +44,7 @@ export default function App() {
       <main className="max-w-screen-xl mx-auto px-4 py-6 space-y-8">
         {/* Net worth chart — spans full width */}
         <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <NetWorthChart />
+          <NetWorthSection />
         </section>
 
         {/* Summary table */}

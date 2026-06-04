@@ -7,7 +7,7 @@
 import { useMemo } from 'react'
 import { useEvaluatorStore } from './store'
 import type { AppState, SimulationResult } from '../engine/types'
-import { buildNetWorthChartData } from '../engine/aggregate'
+import { buildNetWorthChartData, buildNetWorthBreakdownData } from '../engine/aggregate'
 
 export const useAppState = (): AppState =>
   useEvaluatorStore((s) => s.appState)
@@ -33,8 +33,20 @@ export const useSimulation = (scenarioId: string): SimulationResult | null =>
 export const useAllSimulations = (): SimulationResult[] =>
   useEvaluatorStore((s) => s.getAllSimulations())
 
-export const useNetWorthChartData = () => {
+export const useNetWorthChartData = (includeBreakdown = false) => {
   const results = useAllSimulations()
   const displayMode = useDisplayMode()
-  return useMemo(() => buildNetWorthChartData(results, displayMode), [results, displayMode])
+  return useMemo(
+    () => buildNetWorthChartData(results, displayMode, includeBreakdown),
+    [results, displayMode, includeBreakdown],
+  )
+}
+
+export const useNetWorthBreakdownData = (scenarioId: string) => {
+  const result = useSimulation(scenarioId)
+  const displayMode = useDisplayMode()
+  return useMemo(
+    () => (result ? buildNetWorthBreakdownData(result, displayMode) : []),
+    [result, displayMode],
+  )
 }

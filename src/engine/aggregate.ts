@@ -17,13 +17,25 @@ export function getNetWorth(point: MonthlyPoint, displayMode: DisplayMode): numb
   return point.netWorth
 }
 
+/** Apply real/nominal transform to an arbitrary nominal value at a given point. */
+function displayValue(nominal: number, point: MonthlyPoint, displayMode: DisplayMode): number {
+  return displayMode === 'real' ? nominal / point.cpiIndex : nominal
+}
+
 /**
  * Build yearly chart data for NetWorthChart from multiple simulation results.
  * Returns an array of objects with year + one key per scenarioId.
+ *
+ * When `includeBreakdown` is true, also emits two extra series per scenario:
+ *   - `${scenarioId}_propertyValue`  (current property market value)
+ *   - `${scenarioId}_mortgageBalance` (outstanding mortgage principal)
+ * These let the UI overlay the components that drive net worth so the user
+ * can see *why* equity behaves the way it does.
  */
 export function buildNetWorthChartData(
   results: SimulationResult[],
   displayMode: DisplayMode,
+  includeBreakdown = false,
 ): Array<Record<string, number>> {
   if (results.length === 0) return []
 
@@ -34,10 +46,41 @@ export function buildNetWorthChartData(
       const point = result.yearly[y]
       if (point) {
         row[result.scenarioId] = getNetWorth(point, displayMode)
+        if (includeBreakdown) {
+          row[`${result.scenarioId}_propertyValue`] = displayValue(
+            point.propertyValue,
+            point,
+            displayMode,
+          )
+          row[`${result.scenarioId}_mortgageBalance`] = displayValue(
+            point.mortgageBalance,
+            point,
+            displayMode,
+          )
+        }
       }
     }
     return row
   })
+}
+
+/**
+ * Build yearly stacked-area data for a single scenario.
+ * Returns one row per year with the two components of net worth:
+ *   - cashBalance     (lower stack, can be negative when down payment > initial cash)
+ *   - propertyEquity  (upper stack, = propertyValue - mortgageBalance)
+ *
+ * The sum of the two equals net worth at that year.
+ */
+export function buildNetWorthBreakdownData(
+  result: SimulationResult,
+  displayMode: DisplayMode,
+): Array<{ year: number; cashBalance: number; propertyEquity: number }> {
+  return result.yearly.map((point, y) => ({
+    year: y,
+    cashBalance: displayValue(point.cashBalance, point, displayMode),
+    propertyEquity: displayValue(point.propertyEquity, point, displayMode),
+  }))
 }
 
 /**

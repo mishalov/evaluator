@@ -6,7 +6,7 @@
  */
 export * from './types'
 export { simulate, runSimulation } from './simulate'
-export { buildNetWorthChartData, buildCashFlowChartData, getNetWorth } from './aggregate'
+export { buildNetWorthChartData, buildNetWorthBreakdownData, buildCashFlowChartData, getNetWorth } from './aggregate'
 export { monthlyPayment, amortizationSchedule } from './math/mortgage'
 export { fvWithContributions, capitalGainsTax } from './math/compound'
 export { cpiIndex, toReal, geometricMeanCpi } from './math/inflation'
