@@ -8,9 +8,9 @@
  *   This ensures cash block receives all routed inflows in the same month.
  *
  * Monthly loop:
- *   1. Compute salary net income
+ *   1. Compute salary net income (informational only)
  *   2. Step cost blocks (mortgage → deduct, rent → compute differential)
- *   3. Compute total cash inflow = base contribution + differential + salary routing
+ *   3. Compute total cash inflow = base contribution + differential + rental net cash flow
  *   4. Step cash block with total inflow
  *   5. Snapshot MonthlyPoint
  *
@@ -39,7 +39,7 @@
  * balance is a meaningful signal that the scenario is under-funded.
  * Both the mortgage and rental down payments are debited when present.
  */
-import { Scenario, SimulationResult, MonthlyPoint, SimulationSummary } from './types'
+import { AppState, Scenario, SimulationResult, MonthlyPoint, SimulationSummary } from './types'
 import { cpiIndex } from './math/inflation'
 import { monthlyNetSalary } from './math/growth'
 import { capitalGainsTax } from './math/compound'
@@ -64,12 +64,14 @@ import type { CashBlock, MortgageBlock, RentBlock, RentalPropertyBlock } from '.
  * @param scenario      Scenario configuration
  * @param horizonYears  Simulation horizon in years
  * @param cpiAnnual     Annual CPI rate as a decimal (used for cpiIndex recording only)
+ * @param assumptions   Global economic assumptions (rates, tax brackets, etc.)
  * @returns SimulationResult with monthly + yearly data and summary
  */
 export function simulate(
   scenario: Scenario,
   horizonYears: number,
   cpiAnnual: number,
+  assumptions: AppState['assumptions'],
 ): SimulationResult {
   const totalMonths = horizonYears * 12
 
@@ -93,11 +95,11 @@ export function simulate(
     ? initCashBlockState(cashBlock)
     : { balance: 0, totalContributions: 0 }
   let mortgageState: MortgageBlockState | null = mortgageBlock
-    ? initMortgageBlockState(mortgageBlock)
+    ? initMortgageBlockState(mortgageBlock, assumptions.property)
     : null
   let rentState: RentBlockState | null = rentBlock ? initRentBlockState() : null
   let rentalState: RentalBlockState | null = rentalBlock
-    ? initRentalBlockState(rentalBlock)
+    ? initRentalBlockState(rentalBlock, assumptions.property)
     : null
 
   // Down-payment debit. Both the mortgage and rental block init take downPayment
@@ -139,11 +141,11 @@ export function simulate(
 
   // Run monthly loop
   for (let month = 1; month <= totalMonths; month++) {
-    // --- 1. Salary net income ---
+    // --- 1. Salary net income (informational only — not routed into blocks) ---
     const salaryNet = monthlyNetSalary(
-      scenario.salary.annualAmount,
-      scenario.salary.growthRate,
-      scenario.salary.incomeTaxRate,
+      assumptions.salary.annualAmount,
+      assumptions.salary.growthRate,
+      assumptions.salary.incomeTaxRate,
       month - 1, // month 1 uses year-0 salary
     )
 
@@ -151,16 +153,14 @@ export function simulate(
     let mortgagePI = 0
     let mortgageInterest = 0
     let mortgagePrincipal = 0
-    let propertyTax = 0
     let maintenance = 0
 
     if (mortgageBlock && mortgageState) {
-      const result = stepMortgageBlock(mortgageState, mortgageBlock, month - 1)
+      const result = stepMortgageBlock(mortgageState, mortgageBlock, assumptions.property, month - 1)
       mortgageState = result.state
       mortgagePI = result.piPayment
       mortgageInterest = result.interest
       mortgagePrincipal = result.principal
-      propertyTax = result.propertyTax
       maintenance = result.maintenance
     }
 
@@ -168,7 +168,7 @@ export function simulate(
     let differentialAmount = 0
 
     if (rentBlock && rentState) {
-      const result = stepRentBlock(rentState, rentBlock, month - 1, referenceMonthlyPI)
+      const result = stepRentBlock(rentState, rentBlock, assumptions.rentGrowth, month - 1, referenceMonthlyPI)
       rentState = result.state
       rentPayment = result.rent
       differentialAmount = result.differentialAmount
@@ -182,7 +182,12 @@ export function simulate(
     let landlordTax = 0
 
     if (rentalBlock && rentalState) {
-      const result = stepRentalBlock(rentalState, rentalBlock, month - 1)
+      const result = stepRentalBlock(
+        rentalState,
+        rentalBlock,
+        { property: assumptions.property, rentGrowth: assumptions.rentGrowth, landlordTax: assumptions.landlordTax },
+        month - 1,
+      )
       rentalState = result.state
       rentalNetCashFlow = result.netCashFlow
       rentalIncome = result.rentReceived
@@ -198,7 +203,7 @@ export function simulate(
 
     // --- 4. Step cash block ---
     if (cashBlock) {
-      cashState = stepCashBlock(cashState, cashBlock, totalCashContribution)
+      cashState = stepCashBlock(cashState, cashBlock, assumptions.investment, totalCashContribution)
     }
 
     // --- 5. Snapshot ---
@@ -211,7 +216,6 @@ export function simulate(
         mortgagePI,
         mortgageInterest,
         mortgagePrincipal,
-        propertyTax,
         maintenance,
         rentPayment,
         cpiAnnual,
@@ -253,7 +257,7 @@ export function simulate(
     ? capitalGainsTax(
         cashState.balance,
         cashState.totalContributions,
-        cashBlock.capitalGainsTaxRate,
+        assumptions.investment.capitalGainsTaxRate,
       )
     : 0
 
@@ -287,7 +291,6 @@ function snapshotMonth(
   mortgagePayment: number,
   mortgageInterest: number,
   mortgagePrincipal: number,
-  propertyTax: number,
   maintenance: number,
   rent: number,
   cpiAnnual: number,
@@ -321,7 +324,6 @@ function snapshotMonth(
     mortgagePayment,
     mortgageInterest,
     mortgagePrincipal,
-    propertyTax,
     maintenance,
     rent,
     salaryNet,

@@ -6,8 +6,8 @@
  * Phase: 'cost' — steps before the cash (asset) block each month.
  *
  * Rent uses annual-step (lease-style) growth:
- *   rent(m) = monthlyRent * (1 + annualRentGrowth)^floor(m/12)
- * NOT monthly compounding.
+ *   rent(m) = monthlyRent * (1 + rentGrowth)^floor(m/12)
+ * NOT monthly compounding. rentGrowth comes from AppState.assumptions.rentGrowth.
  *
  * Differential investing: when enabled, the surplus
  *   diff(m) = max(0, M_ref - rent(m))
@@ -44,6 +44,7 @@ export interface RentStepResult {
  *
  * @param state               Current rent block state
  * @param block               Static rent block configuration
+ * @param rentGrowth          Annual rent growth rate (from AppState.assumptions.rentGrowth)
  * @param month               Global month index (0-based)
  * @param referenceMonthlyPI  P+I payment of reference mortgage (for differential).
  *                            Caller should pass the sibling MortgageBlock's monthlyPI,
@@ -53,10 +54,11 @@ export interface RentStepResult {
 export function stepRentBlock(
   state: RentBlockState,
   block: RentBlock,
+  rentGrowth: number,
   month: number,
   referenceMonthlyPI: number,
 ): RentStepResult {
-  const rent = computeMonthlyRent(block.monthlyRent, block.annualRentGrowth, month)
+  const rent = computeMonthlyRent(block.monthlyRent, rentGrowth, month)
 
   let differentialAmount = 0
   if (block.differentialInvesting) {

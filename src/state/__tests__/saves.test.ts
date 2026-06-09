@@ -84,11 +84,17 @@ const BASE_STATE: AppState = {
   country: 'US',
   horizonYears: 20,
   displayMode: 'nominal',
+  assumptions: {
+    salary: { annualAmount: 60_000, growthRate: 0.02, incomeTaxRate: 0.22 },
+    investment: { annualReturnRate: 0.07, capitalGainsTaxRate: 0.15 },
+    property: { mortgageInterestRate: 0.06, appreciationRate: 0.04, maintenanceRate: 0.01 },
+    rentGrowth: 0.03,
+    landlordTax: { rate: 0.15, rateHigh: 0.23, threshold: 1_762_812 },
+  },
   scenarios: [
     {
       id: 'sc-1',
       name: 'Test Scenario',
-      salary: { annualAmount: 60_000, growthRate: 0.02, incomeTaxRate: 0.22 },
       blocks: [
         {
           kind: 'cash',
@@ -96,8 +102,6 @@ const BASE_STATE: AppState = {
           label: 'Savings',
           initialBalance: 10_000,
           monthlyContribution: 500,
-          annualReturnRate: 0.07,
-          capitalGainsTaxRate: 0.15,
         },
       ],
     },
@@ -109,7 +113,7 @@ const ALT_STATE: AppState = {
   horizonYears: 30,
   scenarios: [
     {
-      ...BASE_STATE.scenarios[0],
+      id: 'sc-1',
       name: 'Alt Scenario',
       blocks: [
         {
@@ -118,8 +122,6 @@ const ALT_STATE: AppState = {
           label: 'Alt Savings',
           initialBalance: 20_000,
           monthlyContribution: 1_000,
-          annualReturnRate: 0.08,
-          capitalGainsTaxRate: 0.15,
         },
       ],
     },

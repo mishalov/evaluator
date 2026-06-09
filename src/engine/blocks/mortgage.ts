@@ -5,14 +5,19 @@
  *
  * Phase: 'cost' — steps before the cash (asset) block each month.
  *
- * M_ref (used for differential investing) = P+I only (excludes property
- * tax and maintenance). This is by architect design — differential investing
- * compares the full mortgage commitment to rent, but only the P+I portion
- * is the "financing cost" analogous to rent.
+ * M_ref (used for differential investing) = P+I only (excludes maintenance).
+ * This is by architect design — differential investing compares the full
+ * mortgage commitment to rent, but only the P+I portion is the "financing
+ * cost" analogous to rent.
  *
  * Property value uses monthly compounding to avoid staircase artifacts.
+ *
+ * All rates (mortgageInterestRate, appreciationRate, maintenanceRate) come
+ * from global assumptions (AppState.assumptions.property).
+ * Property tax has been removed entirely in v3.
  */
 import { MortgageBlock } from '../types'
+import type { Assumptions } from '../types'
 import { monthlyPayment, amortizationStep } from '../math/mortgage'
 import { propertyValueAtMonth } from '../math/growth'
 
@@ -23,7 +28,7 @@ export interface MortgageBlockState {
   totalPrincipalPaid: number
   /** Sum of all interest paid so far */
   totalInterestPaid: number
-  /** Sum of all property tax + maintenance paid */
+  /** Sum of all maintenance payments */
   totalPropertyCosts: number
   /** Cached P+I payment (constant for fixed-rate) */
   monthlyPI: number
@@ -36,16 +41,18 @@ export interface MortgageBlockState {
 /**
  * Initialize mortgage block state from block config.
  *
- * @param block     Mortgage block configuration
+ * @param block       Mortgage block configuration
+ * @param property    Property assumptions (mortgageInterestRate used for P+I calc)
  * @param startMonth  Starting month index (usually 0)
  */
 export function initMortgageBlockState(
   block: MortgageBlock,
+  property: Assumptions['property'],
   startMonth = 0,
 ): MortgageBlockState {
   const loanAmount = block.propertyValue - block.downPayment
   const termMonths = block.termYears * 12
-  const M = monthlyPayment(loanAmount, block.annualInterestRate, termMonths)
+  const M = monthlyPayment(loanAmount, property.mortgageInterestRate, termMonths)
 
   return {
     mortgageBalance: loanAmount,
@@ -67,11 +74,9 @@ export interface MortgageStepResult {
   interest: number
   /** Principal portion of P+I */
   principal: number
-  /** Property tax this month */
-  propertyTax: number
   /** Maintenance cost this month */
   maintenance: number
-  /** Total out-of-pocket cost this month (P+I + tax + maintenance) */
+  /** Total out-of-pocket cost this month (P+I + maintenance) */
   totalCost: number
   /** Current property value */
   propertyValue: number
@@ -84,24 +89,23 @@ export interface MortgageStepResult {
 /**
  * Advance the mortgage block by one month.
  *
- * @param state   Current mortgage block state
- * @param block   Static block configuration
- * @param month   Global month index (for property value calculation)
+ * @param state     Current mortgage block state
+ * @param block     Static block configuration
+ * @param property  Property assumptions (appreciationRate, mortgageInterestRate, maintenanceRate)
+ * @param month     Global month index (for property value calculation)
  * @returns Step result with payment breakdown and updated state
  */
 export function stepMortgageBlock(
   state: MortgageBlockState,
   block: MortgageBlock,
+  property: Assumptions['property'],
   month: number,
 ): MortgageStepResult {
   // Property value at this month (monthly-compounded appreciation)
-  const propValue = propertyValueAtMonth(block.propertyValue, block.appreciationRate, month)
+  const propValue = propertyValueAtMonth(block.propertyValue, property.appreciationRate, month)
 
-  // Property tax and maintenance (based on current property value).
-  // Compute the parts once; total is the sum — no double-divide.
-  const propTax = (propValue * block.propertyTaxRate) / 12
-  const maintenance = (propValue * block.maintenanceRate) / 12
-  const holdingCost = propTax + maintenance
+  // Maintenance only (property tax removed in v3).
+  const maintenance = (propValue * property.maintenanceRate) / 12
 
   let piPayment = 0
   let interest = 0
@@ -112,7 +116,7 @@ export function stepMortgageBlock(
     const isFinal = month >= state.termMonths - 1
     const step = amortizationStep(
       state.mortgageBalance,
-      block.annualInterestRate,
+      property.mortgageInterestRate,
       state.monthlyPI,
       isFinal,
     )
@@ -123,7 +127,7 @@ export function stepMortgageBlock(
   }
 
   const equity = propValue - newMortgageBalance
-  const totalCost = piPayment + holdingCost
+  const totalCost = piPayment + maintenance
 
   const newState: MortgageBlockState = {
     ...state,
@@ -131,7 +135,7 @@ export function stepMortgageBlock(
     propertyValue: propValue,
     totalPrincipalPaid: state.totalPrincipalPaid + principal,
     totalInterestPaid: state.totalInterestPaid + interest,
-    totalPropertyCosts: state.totalPropertyCosts + holdingCost,
+    totalPropertyCosts: state.totalPropertyCosts + maintenance,
     currentMonth: month + 1,
   }
 
@@ -140,7 +144,6 @@ export function stepMortgageBlock(
     piPayment,
     interest,
     principal,
-    propertyTax: propTax,
     maintenance,
     totalCost,
     propertyValue: propValue,

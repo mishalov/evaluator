@@ -2,6 +2,10 @@
  * ui/components/AddBlockButton.tsx
  *
  * Dropdown button for adding a new block to a scenario.
+ *
+ * makeDefaultBlock mirrors the DEFAULT_STATE / DEFAULT_RENTAL_BLOCK presets
+ * from store.ts. Rate fields (annualReturnRate, mortgageInterestRate, etc.)
+ * are intentionally omitted — they live in global assumptions now.
  */
 import { useState } from 'react'
 import type { BlockKind } from '../../engine/types'
@@ -17,22 +21,27 @@ function makeDefaultBlock(kind: BlockKind, id: string): Block {
   switch (kind) {
     case 'cash':
       return {
-        kind: 'cash', id, label: 'Investment Account',
-        initialBalance: 0, monthlyContribution: 500,
-        annualReturnRate: 0.07, capitalGainsTaxRate: 0.15,
+        kind: 'cash',
+        id,
+        label: 'Investment Account',
+        initialBalance: 0,
+        monthlyContribution: 500,
       }
     case 'mortgage':
       return {
-        kind: 'mortgage', id, label: 'Primary Home',
-        propertyValue: 300_000, downPayment: 60_000,
-        annualInterestRate: 0.06, termYears: 30,
-        appreciationRate: 0.04, propertyTaxRate: 0.01,
-        maintenanceRate: 0.01,
+        kind: 'mortgage',
+        id,
+        label: 'Primary Home',
+        propertyValue: 300_000,
+        downPayment: 60_000,
+        termYears: 30,
       }
     case 'rent':
       return {
-        kind: 'rent', id, label: 'Monthly Rent',
-        monthlyRent: 2_000, annualRentGrowth: 0.03,
+        kind: 'rent',
+        id,
+        label: 'Monthly Rent',
+        monthlyRent: 2_000,
         differentialInvesting: false,
       }
     case 'rental':

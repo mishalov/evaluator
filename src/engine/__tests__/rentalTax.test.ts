@@ -84,35 +84,33 @@ describe('rentalTaxableBase — lumpSum30', () => {
 // ---------------------------------------------------------------------------
 
 describe('rentalTaxableBase — actual', () => {
-  it('deducts interest + property tax + maintenance', () => {
+  it('deducts interest + maintenance (property tax removed in v3)', () => {
     const inputs: RentalTaxInputs = {
       annualRentalIncome: 336_000, // 28k/month
       expenseMethod: 'actual',
       annualMortgageInterest: 120_000,
-      annualPropertyTax: 3_750,
       annualMaintenance: 75_000,
       ...BRACKET,
     }
-    // deduction = 120_000 + 3_750 + 75_000 = 198_750
-    // base = 336_000 - 198_750 = 137_250
+    // deduction = 120_000 + 75_000 = 195_000 (no property tax in v3)
+    // base = 336_000 - 195_000 = 141_000
     const base = rentalTaxableBase(inputs)
-    expect(base).toBeCloseTo(336_000 - 198_750, 4)
+    expect(base).toBeCloseTo(336_000 - 195_000, 4)
   })
 
-  it('includes annualDepreciation in deduction', () => {
+  it('includes annualDepreciation in deduction (property tax removed in v3)', () => {
     const inputs: RentalTaxInputs = {
       annualRentalIncome: 336_000,
       expenseMethod: 'actual',
       annualMortgageInterest: 100_000,
-      annualPropertyTax: 3_000,
       annualMaintenance: 50_000,
       annualDepreciation: 75_000,
       ...BRACKET,
     }
-    // deduction = 100_000 + 3_000 + 50_000 + 75_000 = 228_000
-    // base = 336_000 - 228_000 = 108_000
+    // deduction = 100_000 + 50_000 + 75_000 = 225_000 (no property tax in v3)
+    // base = 336_000 - 225_000 = 111_000
     const base = rentalTaxableBase(inputs)
-    expect(base).toBeCloseTo(108_000, 4)
+    expect(base).toBeCloseTo(111_000, 4)
   })
 
   it('clamps base to 0 when expenses exceed income', () => {
@@ -120,8 +118,7 @@ describe('rentalTaxableBase — actual', () => {
       annualRentalIncome: 100_000,
       expenseMethod: 'actual',
       annualMortgageInterest: 90_000,
-      annualPropertyTax: 5_000,
-      annualMaintenance: 20_000, // total = 115_000 > 100_000
+      annualMaintenance: 25_000, // total = 115_000 > 100_000 (no property tax in v3)
       ...BRACKET,
     }
     expect(rentalTaxableBase(inputs)).toBe(0)

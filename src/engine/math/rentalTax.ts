@@ -6,8 +6,10 @@
  * Two expense-deduction methods:
  *   1. lumpSum30: deduct min(income * 0.30, CZK 600_000). The 600k cap binds
  *      when annual rental income exceeds CZK 2,000,000.
- *   2. actual: deduct real costs (mortgage interest, property tax, maintenance,
- *      optional depreciation). Mortgage PRINCIPAL is NOT deductible.
+ *   2. actual: deduct real costs (mortgage interest, maintenance, optional
+ *      depreciation). Mortgage PRINCIPAL is NOT deductible.
+ *      Property tax was removed in v3 — the 'actual' deduction is now
+ *      interest + maintenance + optional depreciation.
  *
  * Tax brackets (both methods share the same bracket structure):
  *   base ≤ threshold  → tax = base * rateLow
@@ -41,8 +43,6 @@ export interface RentalTaxInputs {
   // ---- Fields used by 'actual' method only ----
   /** Annual mortgage interest paid (PRINCIPAL excluded) */
   annualMortgageInterest?: number
-  /** Annual property tax paid */
-  annualPropertyTax?: number
   /** Annual maintenance cost paid */
   annualMaintenance?: number
   /** Annual depreciation allowance (optional; 0 if omitted) */
@@ -87,12 +87,12 @@ export function rentalTaxableBase(inputs: RentalTaxInputs): number {
     // Deduct the LESSER of (income × 30%) and the statutory cap.
     deduction = Math.min(annualRentalIncome * 0.30, LUMP_SUM_30_CAP)
   } else {
-    // Actual costs: interest + property tax + maintenance + optional depreciation.
+    // Actual costs: interest + maintenance + optional depreciation.
+    // Property tax was removed in v3 — not included in the deduction.
     const interest = inputs.annualMortgageInterest ?? 0
-    const propertyTax = inputs.annualPropertyTax ?? 0
     const maintenance = inputs.annualMaintenance ?? 0
     const depreciation = inputs.annualDepreciation ?? 0
-    deduction = interest + propertyTax + maintenance + depreciation
+    deduction = interest + maintenance + depreciation
   }
 
   return Math.max(0, annualRentalIncome - deduction)

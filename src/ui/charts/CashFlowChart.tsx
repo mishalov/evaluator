@@ -2,7 +2,7 @@
  * ui/charts/CashFlowChart.tsx
  *
  * Stacked bar chart for annual cash flow breakdown of a selected scenario.
- * Shows mortgage P&I, property tax, maintenance, rent, and cash contributions.
+ * Shows mortgage P&I, maintenance, rent, and cash contributions.
  */
 import {
   BarChart,
@@ -59,7 +59,6 @@ export function CashFlowChart({ scenarioId, scenarioName }: Props) {
           <Legend iconSize={10} />
           {/* Outflows — stacked negative side */}
           <Bar dataKey="mortgagePI" name="Mortgage P&I" stackId="a" fill="#2563eb" />
-          <Bar dataKey="propertyTax" name="Property Tax" stackId="a" fill="#7c3aed" />
           <Bar dataKey="maintenance" name="Maintenance" stackId="a" fill="#db2777" />
           <Bar dataKey="rent" name="Rent" stackId="a" fill="#ea580c" />
           <Bar dataKey="cashContribution" name="Contributions" stackId="a" fill="#16a34a" />

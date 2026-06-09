@@ -1,12 +1,12 @@
 /**
  * ui/components/ScenarioColumn.tsx
  *
- * A single scenario column containing salary panel, block editors,
- * and block add/remove controls.
+ * A single scenario column containing block editors and block add/remove controls.
+ *
+ * Salary is no longer per-scenario — it lives in global assumptions (AssumptionsPanel).
  */
 import type { Scenario } from '../../engine/types'
 import { BlockEditor } from './BlockEditor'
-import { SalaryPanel } from './SalaryPanel'
 import { AddBlockButton } from './AddBlockButton'
 import { CashFlowChart } from '../charts/CashFlowChart'
 import { useEvaluatorStore } from '../../state/store'
@@ -40,9 +40,6 @@ export function ScenarioColumn({ scenario, canRemove }: Props) {
           </button>
         )}
       </div>
-
-      {/* Salary */}
-      <SalaryPanel salary={scenario.salary} scenarioId={scenario.id} />
 
       {/* Blocks */}
       <div className="space-y-3">

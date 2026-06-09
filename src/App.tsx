@@ -10,6 +10,7 @@ import { useExternalData } from './ui/hooks/useExternalData'
 import { NetWorthSection } from './ui/charts/NetWorthSection'
 import { SummaryTable } from './ui/charts/SummaryTable'
 import { ScenarioColumn } from './ui/components/ScenarioColumn'
+import { AssumptionsPanel } from './ui/components/AssumptionsPanel'
 import { RealNominalToggle } from './ui/components/RealNominalToggle'
 import { CurrencyPicker } from './ui/components/CurrencyPicker'
 import { HorizonPicker } from './ui/components/HorizonPicker'
@@ -54,6 +55,9 @@ export default function App() {
           <h2 className="text-lg font-semibold text-gray-800 mb-4">Summary</h2>
           <SummaryTable />
         </section>
+
+        {/* Global assumptions — single entry point for shared economic parameters */}
+        <AssumptionsPanel />
 
         {/* Scenario columns */}
         <section>

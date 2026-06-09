@@ -3,6 +3,9 @@
  *
  * Tests for the chart-data aggregators. Focused on the bits that are easy
  * to get wrong: the includeBreakdown shape and the real/nominal transform.
+ *
+ * NOTE (v3 refactor): simulate() now requires an assumptions argument.
+ * Block fixtures no longer carry rate fields.
  */
 import { describe, it, expect } from 'vitest'
 import { simulate } from '../simulate'
@@ -11,15 +14,22 @@ import {
   buildNetWorthBreakdownData,
   buildCashFlowChartData,
 } from '../aggregate'
-import type { Scenario } from '../types'
+import type { Scenario, Assumptions } from '../types'
 
 const HORIZON_YEARS = 10
 const CPI_ANNUAL = 0.025
 
+const BASE_ASSUMPTIONS: Assumptions = {
+  salary: { annualAmount: 80_000, growthRate: 0.02, incomeTaxRate: 0.25 },
+  investment: { annualReturnRate: 0.05, capitalGainsTaxRate: 0.15 },
+  property: { mortgageInterestRate: 0.06, appreciationRate: 0.04, maintenanceRate: 0.01 },
+  rentGrowth: 0.03,
+  landlordTax: { rate: 0.15, rateHigh: 0.23, threshold: 1_762_812 },
+}
+
 const BUY_SCENARIO: Scenario = {
   id: 'buy',
   name: 'Buy',
-  salary: { annualAmount: 80_000, growthRate: 0.02, incomeTaxRate: 0.25 },
   blocks: [
     {
       kind: 'mortgage',
@@ -27,11 +37,7 @@ const BUY_SCENARIO: Scenario = {
       label: 'Home',
       propertyValue: 300_000,
       downPayment: 60_000,
-      annualInterestRate: 0.06,
       termYears: 30,
-      appreciationRate: 0.04,
-      propertyTaxRate: 0.01,
-      maintenanceRate: 0.01,
     },
     {
       kind: 'cash',
@@ -39,8 +45,6 @@ const BUY_SCENARIO: Scenario = {
       label: 'Cash',
       initialBalance: 100_000,
       monthlyContribution: 200,
-      annualReturnRate: 0.05,
-      capitalGainsTaxRate: 0.15,
     },
   ],
 }
@@ -48,14 +52,12 @@ const BUY_SCENARIO: Scenario = {
 const RENT_SCENARIO: Scenario = {
   id: 'rent',
   name: 'Rent',
-  salary: { annualAmount: 80_000, growthRate: 0.02, incomeTaxRate: 0.25 },
   blocks: [
     {
       kind: 'rent',
       id: 'r',
       label: 'Apt',
       monthlyRent: 1_500,
-      annualRentGrowth: 0.03,
       differentialInvesting: false,
     },
     {
@@ -64,16 +66,14 @@ const RENT_SCENARIO: Scenario = {
       label: 'Investment',
       initialBalance: 50_000,
       monthlyContribution: 500,
-      annualReturnRate: 0.07,
-      capitalGainsTaxRate: 0.15,
     },
   ],
 }
 
 describe('buildNetWorthChartData', () => {
   it('emits one row per year + one key per scenario by default', () => {
-    const buy = simulate(BUY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
-    const rent = simulate(RENT_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const buy = simulate(BUY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, BASE_ASSUMPTIONS)
+    const rent = simulate(RENT_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, BASE_ASSUMPTIONS)
     const data = buildNetWorthChartData([buy, rent], 'nominal')
 
     expect(data.length).toBe(HORIZON_YEARS + 1)
@@ -88,7 +88,7 @@ describe('buildNetWorthChartData', () => {
   })
 
   it('emits propertyValue and mortgageBalance keys when includeBreakdown=true', () => {
-    const buy = simulate(BUY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const buy = simulate(BUY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, BASE_ASSUMPTIONS)
     const data = buildNetWorthChartData([buy], 'nominal', true)
 
     expect(data[0].buy_propertyValue).toBe(buy.yearly[0].propertyValue)
@@ -98,7 +98,7 @@ describe('buildNetWorthChartData', () => {
   })
 
   it('applies real-mode transform consistently to all series', () => {
-    const buy = simulate(BUY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const buy = simulate(BUY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, BASE_ASSUMPTIONS)
     const data = buildNetWorthChartData([buy], 'real', true)
 
     // Net worth, property value, and mortgage balance should all be divided
@@ -124,7 +124,7 @@ describe('buildNetWorthChartData', () => {
 
 describe('buildNetWorthBreakdownData', () => {
   it('produces one row per year with cashBalance + propertyEquity summing to net worth', () => {
-    const buy = simulate(BUY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const buy = simulate(BUY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, BASE_ASSUMPTIONS)
     const rows = buildNetWorthBreakdownData(buy, 'nominal')
 
     expect(rows.length).toBe(HORIZON_YEARS + 1)
@@ -138,7 +138,7 @@ describe('buildNetWorthBreakdownData', () => {
   })
 
   it('applies the real-mode transform via cpiIndex per year', () => {
-    const buy = simulate(BUY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const buy = simulate(BUY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, BASE_ASSUMPTIONS)
     const rows = buildNetWorthBreakdownData(buy, 'real')
 
     rows.forEach((row, y) => {
@@ -159,7 +159,7 @@ describe('buildNetWorthBreakdownData', () => {
         b.kind === 'cash' ? { ...b, initialBalance: 0 } : b,
       ),
     }
-    const result = simulate(underfunded, HORIZON_YEARS, CPI_ANNUAL)
+    const result = simulate(underfunded, HORIZON_YEARS, CPI_ANNUAL, BASE_ASSUMPTIONS)
     const rows = buildNetWorthBreakdownData(result, 'nominal')
 
     // Year 0 cash should be negative — the chart expects this and stacks below zero.
@@ -176,7 +176,6 @@ describe('buildNetWorthBreakdownData', () => {
 const LANDLORD_SCENARIO: Scenario = {
   id: 'landlord-agg',
   name: 'Landlord',
-  salary: { annualAmount: 0, growthRate: 0, incomeTaxRate: 0 },
   blocks: [
     {
       kind: 'rental',
@@ -184,18 +183,10 @@ const LANDLORD_SCENARIO: Scenario = {
       label: 'Flat',
       propertyValue: 7_500_000,
       downPayment: 1_500_000,
-      annualInterestRate: 0.052,
       termYears: 30,
-      appreciationRate: 0.04,
-      propertyTaxRate: 0.0005,
-      maintenanceRate: 0.01,
       monthlyRentIncome: 28_000,
-      annualRentGrowth: 0.03,
       vacancyRate: 0.05,
       expenseMethod: 'lumpSum30',
-      landlordTaxRate: 0.15,
-      landlordTaxRateHigh: 0.23,
-      landlordTaxThreshold: 1_762_812,
     },
     {
       kind: 'cash',
@@ -203,15 +194,21 @@ const LANDLORD_SCENARIO: Scenario = {
       label: 'Cash',
       initialBalance: 2_000_000,
       monthlyContribution: 0,
-      annualReturnRate: 0.05,
-      capitalGainsTaxRate: 0.15,
     },
   ],
 }
 
+const LANDLORD_ASSUMPTIONS: Assumptions = {
+  salary: { annualAmount: 0, growthRate: 0, incomeTaxRate: 0 },
+  investment: { annualReturnRate: 0.05, capitalGainsTaxRate: 0.15 },
+  property: { mortgageInterestRate: 0.052, appreciationRate: 0.04, maintenanceRate: 0.01 },
+  rentGrowth: 0.03,
+  landlordTax: { rate: 0.15, rateHigh: 0.23, threshold: 1_762_812 },
+}
+
 describe('buildCashFlowChartData — rentalIncome and landlordTax', () => {
   it('emits positive rentalIncome per year for a landlord scenario', () => {
-    const result = simulate(LANDLORD_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const result = simulate(LANDLORD_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, LANDLORD_ASSUMPTIONS)
     const chart = buildCashFlowChartData(result)
 
     // Each year should have some rental income
@@ -221,7 +218,7 @@ describe('buildCashFlowChartData — rentalIncome and landlordTax', () => {
   })
 
   it('emits positive landlordTax in year 1 (tax settles at month 11)', () => {
-    const result = simulate(LANDLORD_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const result = simulate(LANDLORD_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, LANDLORD_ASSUMPTIONS)
     const chart = buildCashFlowChartData(result)
 
     // Year 1 (months 1–12) includes the settlement at month 11 → tax > 0
@@ -229,7 +226,7 @@ describe('buildCashFlowChartData — rentalIncome and landlordTax', () => {
   })
 
   it('rentalIncome in chart equals sum of monthly rentalIncome for that year', () => {
-    const result = simulate(LANDLORD_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const result = simulate(LANDLORD_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, LANDLORD_ASSUMPTIONS)
     const chart = buildCashFlowChartData(result)
 
     // Spot-check year 2 (months 13–24)
@@ -240,12 +237,20 @@ describe('buildCashFlowChartData — rentalIncome and landlordTax', () => {
   })
 
   it('emits 0 rentalIncome and 0 landlordTax for a non-landlord scenario', () => {
-    const result = simulate(RENT_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const result = simulate(RENT_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, BASE_ASSUMPTIONS)
     const chart = buildCashFlowChartData(result)
 
     for (const row of chart) {
       expect(row.rentalIncome).toBe(0)
       expect(row.landlordTax).toBe(0)
+    }
+  })
+
+  it('chart rows have no propertyTax field (removed in v3)', () => {
+    const result = simulate(LANDLORD_SCENARIO, HORIZON_YEARS, CPI_ANNUAL, LANDLORD_ASSUMPTIONS)
+    const chart = buildCashFlowChartData(result)
+    for (const row of chart) {
+      expect((row as unknown as Record<string, unknown>).propertyTax).toBeUndefined()
     }
   })
 })

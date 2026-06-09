@@ -7,8 +7,12 @@
  * (mortgage, rent) so it receives the full routed inflows in the same month.
  *
  * Capital gains tax is applied at horizon only (not per-period).
+ *
+ * Investment rate and capital-gains tax rate come from global Assumptions
+ * (AppState.assumptions.investment), not from the block itself.
  */
 import { CashBlock } from '../types'
+import type { Assumptions } from '../types'
 import { compoundStep } from '../math/compound'
 
 export interface CashBlockState {
@@ -31,16 +35,18 @@ export function initCashBlockState(block: CashBlock): CashBlockState {
  * Advance the cash block by one month.
  *
  * @param state         Current cash block state
- * @param block         Static block configuration
- * @param contribution  Total contribution this month (base + differential + salary routing)
+ * @param _block        Static block configuration (kept for API symmetry)
+ * @param investment    Investment assumptions (annualReturnRate)
+ * @param contribution  Total contribution this month (base + differential + rental routing)
  * @returns Updated cash block state
  */
 export function stepCashBlock(
   state: CashBlockState,
-  block: CashBlock,
+  _block: CashBlock,
+  investment: Assumptions['investment'],
   contribution: number,
 ): CashBlockState {
-  const newBalance = compoundStep(state.balance, block.annualReturnRate, contribution)
+  const newBalance = compoundStep(state.balance, investment.annualReturnRate, contribution)
   return {
     balance: newBalance,
     totalContributions: state.totalContributions + contribution,

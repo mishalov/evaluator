@@ -73,7 +73,7 @@ export function SummaryTable() {
             ))}
           </tr>
           <tr className="border-b">
-            <td className="py-2 px-3 text-gray-600">Property Costs (Tax + Maint.)</td>
+            <td className="py-2 px-3 text-gray-600">Property Costs (Maintenance)</td>
             {results.map((r) => (
               <td key={r.scenarioId} className="text-right py-2 px-3 text-purple-600">
                 {fmt(r.summary.totalPropertyCosts)}

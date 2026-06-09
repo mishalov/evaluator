@@ -8,21 +8,28 @@
  * Annual tax settlement:
  *   Landlord income tax is computed and debited once per year at month 11,
  *   23, 35, … (i.e. when (month + 1) % 12 === 0). YTD accumulators
- *   (rent, interest, property tax, maintenance) are reset to 0 after
- *   settlement. Months 0–10 within each year carry landlordTaxThisMonth = 0.
+ *   (rent, interest, maintenance) are reset to 0 after settlement. Months
+ *   0–10 within each year carry landlordTaxThisMonth = 0.
  *
  * Net cash flow (may be negative):
- *   netCashFlow = rentReceived − piPayment − propTax − maintenance − landlordTaxThisMonth
+ *   netCashFlow = rentReceived − piPayment − maintenance − landlordTaxThisMonth
+ *
+ * Property tax has been removed entirely in v3. The 'actual' deduction now
+ * covers: interest + maintenance + optional depreciation.
  *
  * The netCashFlow is routed into the sibling CashBlock by simulate.ts.
  * Negative flow is NOT clamped — an under-rented property reducing the
- *   cash balance is a meaningful signal.
+ * cash balance is a meaningful signal.
  *
  * Down payment:
  *   simulate.ts debits the rental downPayment from the cash block at month 0.
  *   This mirrors the mortgage block's down-payment debit pattern.
+ *
+ * All rates (mortgageInterestRate, appreciationRate, maintenanceRate, rentGrowth,
+ * landlordTax) come from AppState.assumptions.
  */
 import { RentalPropertyBlock } from '../types'
+import type { Assumptions } from '../types'
 import { monthlyPayment, amortizationStep } from '../math/mortgage'
 import { propertyValueAtMonth, monthlyRent } from '../math/growth'
 import { rentalIncomeTax } from '../math/rentalTax'
@@ -42,7 +49,7 @@ export interface RentalBlockState {
   totalLandlordTax: number
   /** Lifetime cumulative mortgage interest paid */
   totalInterestPaid: number
-  /** Lifetime cumulative property tax + maintenance paid */
+  /** Lifetime cumulative maintenance paid (property tax removed in v3) */
   totalPropertyCosts: number
   /** Cached P+I monthly payment (constant for fixed-rate) */
   monthlyPI: number
@@ -54,8 +61,6 @@ export interface RentalBlockState {
   ytdRentalIncome: number
   /** YTD mortgage interest (resets at settlement) */
   ytdInterest: number
-  /** YTD property tax (resets at settlement) */
-  ytdPropertyTax: number
   /** YTD maintenance (resets at settlement) */
   ytdMaintenance: number
 }
@@ -64,15 +69,17 @@ export interface RentalBlockState {
  * Initialize rental block state from block config.
  *
  * @param block       Rental property block configuration
+ * @param property    Property assumptions (mortgageInterestRate for P+I calc)
  * @param startMonth  Starting month index (usually 0)
  */
 export function initRentalBlockState(
   block: RentalPropertyBlock,
+  property: Assumptions['property'],
   startMonth = 0,
 ): RentalBlockState {
   const loanAmount = block.propertyValue - block.downPayment
   const termMonths = block.termYears * 12
-  const M = monthlyPayment(loanAmount, block.annualInterestRate, termMonths)
+  const M = monthlyPayment(loanAmount, property.mortgageInterestRate, termMonths)
 
   // Suppress unused parameter warning — kept for API symmetry with mortgage block
   void startMonth
@@ -88,7 +95,6 @@ export function initRentalBlockState(
     termMonths,
     ytdRentalIncome: 0,
     ytdInterest: 0,
-    ytdPropertyTax: 0,
     ytdMaintenance: 0,
   }
 }
@@ -107,8 +113,6 @@ export interface RentalStepResult {
   interest: number
   /** Principal portion of P+I this month */
   principal: number
-  /** Property tax this month */
-  propertyTax: number
   /** Maintenance cost this month */
   maintenance: number
   /**
@@ -117,7 +121,7 @@ export interface RentalStepResult {
    * Zero for months 0–10 within each year.
    */
   landlordTaxThisMonth: number
-  /** Net cash flow this month = rentReceived − piPayment − propTax − maintenance − landlordTaxThisMonth */
+  /** Net cash flow this month = rentReceived − piPayment − maintenance − landlordTaxThisMonth */
   netCashFlow: number
   /** Current property market value */
   propertyValue: number
@@ -134,22 +138,25 @@ export interface RentalStepResult {
 /**
  * Advance the rental property block by one month.
  *
- * @param state   Current rental block state
- * @param block   Static block configuration
- * @param month   Global month index (0-based; passed by simulate.ts as month − 1)
+ * @param state        Current rental block state
+ * @param block        Static block configuration
+ * @param assumptions  Full assumptions object (property, rentGrowth, landlordTax)
+ * @param month        Global month index (0-based; passed by simulate.ts as month − 1)
  * @returns Step result with full cash-flow breakdown and updated state
  */
 export function stepRentalBlock(
   state: RentalBlockState,
   block: RentalPropertyBlock,
+  assumptions: Pick<Assumptions, 'property' | 'rentGrowth' | 'landlordTax'>,
   month: number,
 ): RentalStepResult {
-  // --- Property value (monthly-compounded appreciation) ---
-  const propValue = propertyValueAtMonth(block.propertyValue, block.appreciationRate, month)
+  const { property, rentGrowth, landlordTax } = assumptions
 
-  // --- Monthly holding costs (based on current property value) ---
-  const propTax = (propValue * block.propertyTaxRate) / 12
-  const maintenance = (propValue * block.maintenanceRate) / 12
+  // --- Property value (monthly-compounded appreciation) ---
+  const propValue = propertyValueAtMonth(block.propertyValue, property.appreciationRate, month)
+
+  // --- Monthly holding costs: maintenance only (property tax removed in v3) ---
+  const maintenance = (propValue * property.maintenanceRate) / 12
 
   // --- Mortgage amortization ---
   let piPayment = 0
@@ -161,7 +168,7 @@ export function stepRentalBlock(
     const isFinal = month >= state.termMonths - 1
     const step = amortizationStep(
       state.mortgageBalance,
-      block.annualInterestRate,
+      property.mortgageInterestRate,
       state.monthlyPI,
       isFinal,
     )
@@ -172,13 +179,12 @@ export function stepRentalBlock(
   }
 
   // --- Rental income (lease-style annual step, adjusted for vacancy) ---
-  const grossRent = monthlyRent(block.monthlyRentIncome, block.annualRentGrowth, month)
+  const grossRent = monthlyRent(block.monthlyRentIncome, rentGrowth, month)
   const rentReceived = grossRent * (1 - block.vacancyRate)
 
   // --- Update YTD accumulators ---
   const newYtdRentalIncome = state.ytdRentalIncome + rentReceived
   const newYtdInterest = state.ytdInterest + interest
-  const newYtdPropertyTax = state.ytdPropertyTax + propTax
   const newYtdMaintenance = state.ytdMaintenance + maintenance
 
   // --- Annual tax settlement ---
@@ -188,24 +194,25 @@ export function stepRentalBlock(
   let resetYtd = false
 
   if ((month + 1) % 12 === 0) {
-    // Annual settlement: compute tax on the full year's accumulation
+    // Annual settlement: compute tax on the full year's accumulation.
+    // 'actual' deduction: interest + maintenance + optional depreciation.
+    // Property tax was removed in v3 — no annualPropertyTax passed.
     const taxResult = rentalIncomeTax({
       annualRentalIncome: newYtdRentalIncome,
       expenseMethod: block.expenseMethod,
       annualMortgageInterest: newYtdInterest,
-      annualPropertyTax: newYtdPropertyTax,
       annualMaintenance: newYtdMaintenance,
       annualDepreciation: block.annualDepreciation,
-      taxThreshold: block.landlordTaxThreshold,
-      rateLow: block.landlordTaxRate,
-      rateHigh: block.landlordTaxRateHigh,
+      taxThreshold: landlordTax.threshold,
+      rateLow: landlordTax.rate,
+      rateHigh: landlordTax.rateHigh,
     })
     landlordTaxThisMonth = taxResult.incomeTax
     resetYtd = true
   }
 
-  // --- Net cash flow ---
-  const netCashFlow = rentReceived - piPayment - propTax - maintenance - landlordTaxThisMonth
+  // --- Net cash flow (property tax removed in v3) ---
+  const netCashFlow = rentReceived - piPayment - maintenance - landlordTaxThisMonth
 
   // --- Build updated state ---
   const equity = propValue - newMortgageBalance
@@ -215,12 +222,11 @@ export function stepRentalBlock(
     totalRentalIncome: state.totalRentalIncome + rentReceived,
     totalLandlordTax: state.totalLandlordTax + landlordTaxThisMonth,
     totalInterestPaid: state.totalInterestPaid + interest,
-    totalPropertyCosts: state.totalPropertyCosts + propTax + maintenance,
+    totalPropertyCosts: state.totalPropertyCosts + maintenance,
     monthlyPI: state.monthlyPI,
     termMonths: state.termMonths,
     ytdRentalIncome: resetYtd ? 0 : newYtdRentalIncome,
     ytdInterest: resetYtd ? 0 : newYtdInterest,
-    ytdPropertyTax: resetYtd ? 0 : newYtdPropertyTax,
     ytdMaintenance: resetYtd ? 0 : newYtdMaintenance,
   }
 
@@ -230,7 +236,6 @@ export function stepRentalBlock(
     piPayment,
     interest,
     principal,
-    propertyTax: propTax,
     maintenance,
     landlordTaxThisMonth,
     netCashFlow,

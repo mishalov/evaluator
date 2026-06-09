@@ -85,12 +85,12 @@ export function buildNetWorthBreakdownData(
 
 /**
  * Build monthly cash flow chart data for a single scenario.
- * Returns stacked bar data: mortgage P&I, tax, maintenance, rent, contributions.
+ * Returns stacked bar data: mortgage P&I, maintenance, rent, contributions.
  *
  * Year y covers months y*12+1 .. y*12+12 (1-indexed months within the year).
  * Each flow field is the SUM of all 12 monthly values in that year — NOT a
  * single month multiplied by 12. This matters for any quantity that varies
- * within a year (property tax and maintenance grow with property appreciation;
+ * within a year (maintenance grows with property appreciation;
  * rent steps annually; contributions can include a variable differential).
  *
  * Property value snapshot uses the end-of-year month (month y*12+12) to
@@ -112,7 +112,6 @@ export function buildCashFlowChartData(
     // Months belonging to year y: indices y*12-11 .. y*12 (1-based within year)
     // i.e. monthly[y*12 - 11] through monthly[y*12]
     let mortgagePI = 0
-    let propertyTax = 0
     let maintenance = 0
     let rent = 0
     let cashContribution = 0
@@ -123,7 +122,6 @@ export function buildCashFlowChartData(
       const p = monthly[m]
       if (!p) continue
       mortgagePI += p.mortgagePayment
-      propertyTax += p.propertyTax
       maintenance += p.maintenance
       rent += p.rent
       cashContribution += p.cashContribution
@@ -131,7 +129,7 @@ export function buildCashFlowChartData(
       landlordTax += p.landlordTax
     }
 
-    rows.push({ year: y, mortgagePI, propertyTax, maintenance, rent, cashContribution, rentalIncome, landlordTax })
+    rows.push({ year: y, mortgagePI, maintenance, rent, cashContribution, rentalIncome, landlordTax })
   }
 
   return rows

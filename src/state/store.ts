@@ -13,13 +13,16 @@
  */
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
-import type { AppState, Block, Scenario, SimulationResult, MarketData, RentalPropertyBlock } from '../engine/types'
+import type { AppState, Assumptions, Block, Scenario, SimulationResult, MarketData, RentalPropertyBlock } from '../engine/types'
 import { simulate } from '../engine/simulate'
-import { CURRENT_VERSION } from './schema'
+import { CURRENT_VERSION, DEFAULT_ASSUMPTIONS } from './schema'
 import { readFromHash, writeToHash } from './url'
 import { saveToLocalStorage, loadFromLocalStorage, clearLocalStorage } from './persistence'
 import * as saves from './saves'
 import type { SaveResult, LoadResult } from './saves'
+
+// Re-export so UI and tests can import from one place
+export { DEFAULT_ASSUMPTIONS }
 
 // ---------------------------------------------------------------------------
 // Block factory helpers
@@ -30,6 +33,9 @@ import type { SaveResult, LoadResult } from './saves'
  * Money fields (propertyValue, downPayment, monthlyRentIncome) are provided
  * as meaningful Prague defaults here; the UI "zeroed preset" in DEFAULT_STATE
  * overrides them to 0 so users see blank fields on first load.
+ *
+ * Rate fields (annualInterestRate, appreciationRate, maintenanceRate,
+ * annualRentGrowth, landlordTax*) now live in DEFAULT_ASSUMPTIONS.
  */
 export const DEFAULT_RENTAL_BLOCK: RentalPropertyBlock = {
   kind: 'rental',
@@ -37,18 +43,10 @@ export const DEFAULT_RENTAL_BLOCK: RentalPropertyBlock = {
   label: 'Rental Property',
   propertyValue: 7_500_000,
   downPayment: 1_500_000,
-  annualInterestRate: 0.052,
   termYears: 30,
-  appreciationRate: 0.04,
-  propertyTaxRate: 0.0005,
-  maintenanceRate: 0.01,
   monthlyRentIncome: 28_000,
-  annualRentGrowth: 0.03,
   vacancyRate: 0.05,
   expenseMethod: 'lumpSum30',
-  landlordTaxRate: 0.15,
-  landlordTaxRateHigh: 0.23,
-  landlordTaxThreshold: 1_762_812,
 }
 
 // ---------------------------------------------------------------------------
@@ -61,18 +59,17 @@ export const DEFAULT_STATE: AppState = {
   country: 'CZ',
   horizonYears: 30,
   displayMode: 'nominal',
+  assumptions: DEFAULT_ASSUMPTIONS,
   scenarios: [
     {
       id: 'scenario-1',
       name: 'Rent & Invest',
-      salary: { annualAmount: 0, growthRate: 0.02, incomeTaxRate: 0.25 },
       blocks: [
         {
           kind: 'rent',
           id: 'r1',
           label: 'Monthly Rent',
           monthlyRent: 0,
-          annualRentGrowth: 0.03,
           differentialInvesting: true,
           referenceMonthlyPayment: 0,
         },
@@ -82,15 +79,12 @@ export const DEFAULT_STATE: AppState = {
           label: 'Investment Account',
           initialBalance: 0,
           monthlyContribution: 0,
-          annualReturnRate: 0.07,
-          capitalGainsTaxRate: 0.15,
         },
       ],
     },
     {
       id: 'scenario-2',
       name: 'Buy a Home',
-      salary: { annualAmount: 0, growthRate: 0.02, incomeTaxRate: 0.25 },
       blocks: [
         {
           kind: 'mortgage',
@@ -98,11 +92,7 @@ export const DEFAULT_STATE: AppState = {
           label: 'Primary Mortgage',
           propertyValue: 0,
           downPayment: 0,
-          annualInterestRate: 0.06,
           termYears: 30,
-          appreciationRate: 0.04,
-          propertyTaxRate: 0.01,
-          maintenanceRate: 0.01,
         },
         {
           kind: 'cash',
@@ -110,38 +100,25 @@ export const DEFAULT_STATE: AppState = {
           label: 'Savings',
           initialBalance: 0,
           monthlyContribution: 0,
-          annualReturnRate: 0.05,
-          capitalGainsTaxRate: 0.15,
         },
       ],
     },
     {
       id: 'scenario-3',
       name: 'Landlord + Rent & Invest',
-      // Salary zeroed — same convention as the other two presets.
-      salary: { annualAmount: 0, growthRate: 0.02, incomeTaxRate: 0.25 },
       blocks: [
         {
           // Rental property block — money fields zeroed per preset convention.
-          // Rates and method fields retain realistic Prague/Czech defaults so
-          // users only need to fill in the CZK amounts.
+          // Rates and method fields are in global assumptions.
           kind: 'rental',
           id: 'rnt1',
           label: 'Rental Property',
           propertyValue: 0,
           downPayment: 0,
-          annualInterestRate: DEFAULT_RENTAL_BLOCK.annualInterestRate,
           termYears: DEFAULT_RENTAL_BLOCK.termYears,
-          appreciationRate: DEFAULT_RENTAL_BLOCK.appreciationRate,
-          propertyTaxRate: DEFAULT_RENTAL_BLOCK.propertyTaxRate,
-          maintenanceRate: DEFAULT_RENTAL_BLOCK.maintenanceRate,
           monthlyRentIncome: 0,
-          annualRentGrowth: DEFAULT_RENTAL_BLOCK.annualRentGrowth,
           vacancyRate: DEFAULT_RENTAL_BLOCK.vacancyRate,
           expenseMethod: DEFAULT_RENTAL_BLOCK.expenseMethod,
-          landlordTaxRate: DEFAULT_RENTAL_BLOCK.landlordTaxRate,
-          landlordTaxRateHigh: DEFAULT_RENTAL_BLOCK.landlordTaxRateHigh,
-          landlordTaxThreshold: DEFAULT_RENTAL_BLOCK.landlordTaxThreshold,
         },
         {
           // Consumption rent (the landlord also lives somewhere else).
@@ -151,7 +128,6 @@ export const DEFAULT_STATE: AppState = {
           id: 'r3',
           label: 'Own Rent',
           monthlyRent: 0,
-          annualRentGrowth: 0.03,
           differentialInvesting: false,
         },
         {
@@ -160,8 +136,6 @@ export const DEFAULT_STATE: AppState = {
           label: 'Investment Account',
           initialBalance: 0,
           monthlyContribution: 0,
-          annualReturnRate: 0.07,
-          capitalGainsTaxRate: 0.15,
         },
       ],
     },
@@ -195,16 +169,22 @@ function stableStringify(obj: unknown): string {
   })
 }
 
-function getCacheKey(scenario: Scenario, horizonYears: number, cpiAnnual: number): string {
-  return stableStringify({ scenario, horizonYears, cpiAnnual })
+function getCacheKey(
+  scenario: Scenario,
+  horizonYears: number,
+  cpiAnnual: number,
+  assumptions: Assumptions,
+): string {
+  return stableStringify({ scenario, horizonYears, cpiAnnual, assumptions })
 }
 
 function getCachedSimulation(
   scenario: Scenario,
   horizonYears: number,
   cpiAnnual: number,
+  assumptions: Assumptions,
 ): SimulationResult {
-  const key = getCacheKey(scenario, horizonYears, cpiAnnual)
+  const key = getCacheKey(scenario, horizonYears, cpiAnnual, assumptions)
   if (simulationCache.has(key)) {
     // Move to end (most recently used)
     const result = simulationCache.get(key)!
@@ -213,7 +193,7 @@ function getCachedSimulation(
     return result
   }
 
-  const result = simulate(scenario, horizonYears, cpiAnnual)
+  const result = simulate(scenario, horizonYears, cpiAnnual, assumptions)
 
   // Evict oldest if at cap
   if (simulationCache.size >= SIM_CACHE_MAX) {
@@ -250,6 +230,7 @@ export interface EvaluatorStore {
   removeScenario: (scenarioId: string) => void
   addBlock: (scenarioId: string, block: Block) => void
   removeBlock: (scenarioId: string, blockId: string) => void
+  setAssumptions: (update: Partial<Assumptions>) => void
   setCurrency: (currency: string) => void
   setCountry: (country: string) => void
   setHorizonYears: (years: number) => void
@@ -332,7 +313,6 @@ export const useEvaluatorStore = create<EvaluatorStore>()(
         const newScenario: Scenario = {
           id,
           name: `Scenario ${scenarios.length + 1}`,
-          salary: scenarios[0]?.salary ?? DEFAULT_STATE.scenarios[0].salary,
           blocks: [
             {
               kind: 'cash',
@@ -340,8 +320,6 @@ export const useEvaluatorStore = create<EvaluatorStore>()(
               label: 'Investment Account',
               initialBalance: 0,
               monthlyContribution: 0,
-              annualReturnRate: 0.07,
-              capitalGainsTaxRate: 0.15,
             },
           ],
         }
@@ -379,6 +357,14 @@ export const useEvaluatorStore = create<EvaluatorStore>()(
               ? s
               : { ...s, blocks: s.blocks.filter((b) => b.id !== blockId) },
           ),
+        },
+      })),
+
+    setAssumptions: (update) =>
+      set((store) => ({
+        appState: {
+          ...store.appState,
+          assumptions: { ...store.appState.assumptions, ...update },
         },
       })),
 
@@ -438,7 +424,7 @@ export const useEvaluatorStore = create<EvaluatorStore>()(
         appState.inflationOverridePct ??
         marketData?.cpiAnnual ??
         0.025
-      return getCachedSimulation(scenario, appState.horizonYears, cpiAnnual)
+      return getCachedSimulation(scenario, appState.horizonYears, cpiAnnual, appState.assumptions)
     },
 
     getAllSimulations: () => {
@@ -451,7 +437,7 @@ export const useEvaluatorStore = create<EvaluatorStore>()(
         marketData?.cpiAnnual ??
         0.025
       const result = appState.scenarios.map((scenario) =>
-        getCachedSimulation(scenario, appState.horizonYears, cpiAnnual),
+        getCachedSimulation(scenario, appState.horizonYears, cpiAnnual, appState.assumptions),
       )
       lastAllSimsAppState = appState
       lastAllSimsMarketData = marketData
