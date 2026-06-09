@@ -25,6 +25,8 @@ export function blockPhase(kind: BlockKind): BlockPhase {
       return 'cost'
     case 'rent':
       return 'cost'
+    case 'rental':
+      return 'cost'
     case 'cash':
       return 'asset'
     default:

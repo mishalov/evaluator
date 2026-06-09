@@ -18,7 +18,7 @@ import {
   CURRENT_VERSION,
   type Migration,
 } from '../schema'
-import type { AppState } from '../../engine/types'
+import type { AppState, RentalPropertyBlock } from '../../engine/types'
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -195,18 +195,18 @@ describe('runMigrations (harness)', () => {
     expect(result.schemaVersion).toBe(CURRENT_VERSION)
   })
 
-  it('migrations map does not contain any entry that sets schemaVersion itself (M4 contract)', () => {
-    // Each migration function must NOT set schemaVersion — that is the harness's job.
-    // We verify this by running each migration and checking the returned object
-    // does not explicitly carry schemaVersion (or if it does, it must equal what the
-    // harness would set anyway — i.e. same value, not a mistake).
-    // This is a forward-looking lint: once real migrations are added, this catches regressions.
+  it('migrations map does not contain any entry that incorrectly sets schemaVersion (M4 contract)', () => {
+    // Each migration function must NOT actively change schemaVersion — that is the
+    // harness's job. A no-op migration that passes the input through unchanged
+    // (and thus returns the same schemaVersion) is fine.
+    // This lint catches migrations that explicitly increment schemaVersion themselves.
     for (const [vStr, migrate] of Object.entries(migrations)) {
       const v = parseInt(vStr, 10)
       const input: Record<string, unknown> = { schemaVersion: v, placeholder: true }
       const output = migrate(input)
-      // If the migration sets schemaVersion, it must equal v+1 (the harness value)
-      if ('schemaVersion' in output) {
+      // If the migration CHANGED schemaVersion relative to input, it must be v+1.
+      // Passing schemaVersion through unchanged (no-op) is explicitly allowed.
+      if ('schemaVersion' in output && output.schemaVersion !== v) {
         expect(output.schemaVersion).toBe(v + 1)
       }
     }
@@ -218,5 +218,149 @@ describe('runMigrations (harness)', () => {
     expect(result.data).toBe('unchanged')
     // schemaVersion should not change (loop doesn't execute)
     expect(result.schemaVersion).toBe(CURRENT_VERSION)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// RentalPropertyBlock schema
+// ---------------------------------------------------------------------------
+
+const VALID_RENTAL_BLOCK: RentalPropertyBlock = {
+  kind: 'rental',
+  id: 'rnt1',
+  label: 'Prague Flat',
+  propertyValue: 7_500_000,
+  downPayment: 1_500_000,
+  annualInterestRate: 0.052,
+  termYears: 30,
+  appreciationRate: 0.04,
+  propertyTaxRate: 0.0005,
+  maintenanceRate: 0.01,
+  monthlyRentIncome: 28_000,
+  annualRentGrowth: 0.03,
+  vacancyRate: 0.05,
+  expenseMethod: 'lumpSum30',
+  landlordTaxRate: 0.15,
+  landlordTaxRateHigh: 0.23,
+  landlordTaxThreshold: 1_762_812,
+}
+
+describe('RentalPropertyBlockSchema', () => {
+  const stateWithRental: AppState = {
+    ...VALID_STATE,
+    schemaVersion: CURRENT_VERSION,
+    scenarios: [
+      {
+        id: 'sc-rental',
+        name: 'Landlord',
+        salary: VALID_STATE.scenarios[0].salary,
+        blocks: [
+          VALID_RENTAL_BLOCK,
+          {
+            kind: 'cash',
+            id: 'c1',
+            label: 'Savings',
+            initialBalance: 0,
+            monthlyContribution: 0,
+            annualReturnRate: 0.05,
+            capitalGainsTaxRate: 0.15,
+          },
+        ],
+      },
+    ],
+  }
+
+  it('validates a rental block inside an AppState without error', () => {
+    const result = AppStateSchema.safeParse(stateWithRental)
+    expect(result.success).toBe(true)
+  })
+
+  it('round-trips through AppStateSchema without data loss', () => {
+    const result = AppStateSchema.safeParse(stateWithRental)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      const rentalBlock = result.data.scenarios[0].blocks[0]
+      expect(rentalBlock.kind).toBe('rental')
+      if (rentalBlock.kind === 'rental') {
+        expect(rentalBlock.propertyValue).toBe(7_500_000)
+        expect(rentalBlock.expenseMethod).toBe('lumpSum30')
+        expect(rentalBlock.landlordTaxThreshold).toBe(1_762_812)
+        expect(rentalBlock.annualDepreciation).toBeUndefined()
+      }
+    }
+  })
+
+  it('validates optional annualDepreciation when present', () => {
+    const withDepr: AppState = {
+      ...stateWithRental,
+      scenarios: [
+        {
+          ...stateWithRental.scenarios[0],
+          blocks: [
+            { ...VALID_RENTAL_BLOCK, annualDepreciation: 50_000 },
+            stateWithRental.scenarios[0].blocks[1],
+          ],
+        },
+      ],
+    }
+    const result = AppStateSchema.safeParse(withDepr)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      const b = result.data.scenarios[0].blocks[0]
+      if (b.kind === 'rental') {
+        expect(b.annualDepreciation).toBe(50_000)
+      }
+    }
+  })
+
+  it('rejects invalid expenseMethod value', () => {
+    const bad = {
+      ...stateWithRental,
+      scenarios: [
+        {
+          ...stateWithRental.scenarios[0],
+          blocks: [
+            { ...VALID_RENTAL_BLOCK, expenseMethod: 'notAValidMethod' },
+            stateWithRental.scenarios[0].blocks[1],
+          ],
+        },
+      ],
+    }
+    const result = AppStateSchema.safeParse(bad)
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('v1 → v2 migration (rental block addition)', () => {
+  it('v1 payload without rental block migrates to v2 (no-op) and validates', () => {
+    // Build a v1-shaped payload (before rental block was added)
+    const v1Payload = {
+      schemaVersion: 1,
+      currency: 'CZK',
+      country: 'CZ',
+      horizonYears: 30,
+      displayMode: 'nominal',
+      scenarios: [
+        {
+          id: 'sc-1',
+          name: 'Rent Only',
+          salary: { annualAmount: 0, growthRate: 0.02, incomeTaxRate: 0.25 },
+          blocks: [
+            {
+              kind: 'rent',
+              id: 'r1',
+              label: 'Rent',
+              monthlyRent: 0,
+              annualRentGrowth: 0.03,
+              differentialInvesting: false,
+            },
+          ],
+        },
+      ],
+    }
+    // validateAndMigrate must run the v1→v2 no-op, bump schemaVersion, and validate
+    const result = validateAndMigrate(v1Payload)
+    expect(result).not.toBeNull()
+    expect(result!.schemaVersion).toBe(CURRENT_VERSION) // = 2
   })
 })

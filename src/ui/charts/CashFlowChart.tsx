@@ -57,11 +57,16 @@ export function CashFlowChart({ scenarioId, scenarioName }: Props) {
             labelFormatter={(l: number) => `Year ${l}`}
           />
           <Legend iconSize={10} />
+          {/* Outflows — stacked negative side */}
           <Bar dataKey="mortgagePI" name="Mortgage P&I" stackId="a" fill="#2563eb" />
           <Bar dataKey="propertyTax" name="Property Tax" stackId="a" fill="#7c3aed" />
           <Bar dataKey="maintenance" name="Maintenance" stackId="a" fill="#db2777" />
           <Bar dataKey="rent" name="Rent" stackId="a" fill="#ea580c" />
           <Bar dataKey="cashContribution" name="Contributions" stackId="a" fill="#16a34a" />
+          {/* Rental-specific series — landlordTax is an outflow (positive value = cost paid) */}
+          <Bar dataKey="landlordTax" name="Landlord Tax" stackId="a" fill="#dc2626" />
+          {/* Rental income — stacked on a separate positive stack so it shows as inflow */}
+          <Bar dataKey="rentalIncome" name="Rental Income" stackId="b" fill="#0d9488" />
         </BarChart>
       </ResponsiveContainer>
     </div>

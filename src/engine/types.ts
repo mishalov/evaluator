@@ -69,7 +69,7 @@ export interface MortgageBlock {
 }
 
 /**
- * RentBlock — renting a property.
+ * RentBlock — renting a property (consumption rent, not landlord income).
  *
  * Rent grows annually (lease-style, not monthly compounded):
  *   rent(m) = monthlyRent * (1 + annualRentGrowth)^floor(m/12)
@@ -100,8 +100,80 @@ export interface RentBlock {
   referenceMonthlyPayment?: number
 }
 
+/**
+ * Rental expense deduction method for Czech §9 landlord tax:
+ *   - 'lumpSum30': deduct the lesser of (income × 30%) and CZK 600,000
+ *   - 'actual':    deduct real costs (mortgage interest, property tax, maintenance,
+ *                  optional depreciation). Principal is NOT deductible.
+ */
+export type RentalExpenseMethod = 'lumpSum30' | 'actual'
+
+/**
+ * RentalPropertyBlock — owning a residential rental property.
+ *
+ * The landlord receives monthly rent income, pays mortgage P+I (if any),
+ * property tax, and maintenance. Czech §9 landlord income tax is settled
+ * annually (at month 11, 23, 35, …) using YTD accumulators, then reset.
+ *
+ * Property value appreciates monthly: v_{m+1} = v_m * (1 + appreciationRate)^(1/12).
+ * Rental net cash flow (may be negative) is routed into the sibling CashBlock.
+ *
+ * Note: rental PI does NOT feed the consumption-RentBlock's differential
+ * investing calculation — M_ref is resolved from the MortgageBlock only.
+ */
+export interface RentalPropertyBlock {
+  kind: 'rental'
+  id: string
+  label: string
+  /** Total property purchase price */
+  propertyValue: number
+  /** Down payment (reduces loan principal). Debited from the sibling CashBlock at month 0. */
+  downPayment: number
+  /** Annual mortgage interest rate as a decimal (e.g. 0.052 for 5.2%) */
+  annualInterestRate: number
+  /** Loan term in years */
+  termYears: number
+  /** Annual property appreciation rate as a decimal */
+  appreciationRate: number
+  /**
+   * Annual property tax rate as a decimal.
+   * Monthly cost = propertyValue_m * propertyTaxRate / 12.
+   */
+  propertyTaxRate: number
+  /**
+   * Annual maintenance cost as a decimal of property value.
+   * Monthly cost = propertyValue_m * maintenanceRate / 12.
+   */
+  maintenanceRate: number
+  /** Base monthly rent income at month 0 (nominal currency units) */
+  monthlyRentIncome: number
+  /** Annual rent growth rate as a decimal (lease-style annual step) */
+  annualRentGrowth: number
+  /**
+   * Vacancy rate as a decimal (0 = always occupied, 0.05 = 5% vacant).
+   * Effective monthly rent = rent(m) * (1 - vacancyRate).
+   */
+  vacancyRate: number
+  /** Czech §9 expense deduction method for landlord income tax */
+  expenseMethod: RentalExpenseMethod
+  /** Lower Czech income tax rate (15% up to threshold, 2026) */
+  landlordTaxRate: number
+  /** Higher Czech income tax rate (23% above threshold, 2026) */
+  landlordTaxRateHigh: number
+  /**
+   * Annual taxable income threshold (CZK 1,762,812 = 36× avg wage, 2026).
+   * Base ≤ threshold → taxed at landlordTaxRate; excess taxed at landlordTaxRateHigh.
+   */
+  landlordTaxThreshold: number
+  /**
+   * Optional annual depreciation deduction (nominal currency units).
+   * Only applicable when expenseMethod = 'actual'. If omitted, no depreciation is applied.
+   */
+  annualDepreciation?: number
+}
+
 /** Discriminated union of all block types */
-export type Block = CashBlock | MortgageBlock | RentBlock
+export type Block = CashBlock | MortgageBlock | RentBlock | RentalPropertyBlock
 
 /** Block kinds as a string literal union */
 export type BlockKind = Block['kind']
@@ -166,9 +238,9 @@ export interface MonthlyPoint {
   year: number
   /** Liquid cash / investment balance (nominal) */
   cashBalance: number
-  /** Current property market value (nominal) */
+  /** Sum of all property market values across all property blocks (nominal) */
   propertyValue: number
-  /** Outstanding mortgage principal (nominal) */
+  /** Sum of all outstanding mortgage principals across all property blocks (nominal) */
   mortgageBalance: number
   /** Property equity = propertyValue - mortgageBalance (nominal) */
   propertyEquity: number
@@ -193,6 +265,12 @@ export interface MonthlyPoint {
   cashContribution: number
   /** CPI index at this month: (1 + cpiAnnual)^(month/12) */
   cpiIndex: number
+  /** Gross rental income received this month (0 if no rental block) */
+  rentalIncome: number
+  /** Landlord income tax paid this month (non-zero only at annual settlement, month 11/23/…) */
+  landlordTax: number
+  /** Rental net cash flow this month = rentReceived − piPayment − propTax − maintenance − landlordTax */
+  rentalNetCashFlow: number
 }
 
 export interface SimulationSummary {
@@ -212,6 +290,10 @@ export interface SimulationSummary {
   downPayment: number
   /** Capital gains tax owed at horizon (not deducted from balance by default) */
   capitalGainsTaxAtHorizon: number
+  /** Total gross rental income received across the horizon (0 if no rental block) */
+  totalRentalIncome: number
+  /** Total landlord income tax paid across the horizon (0 if no rental block) */
+  totalLandlordTax: number
 }
 
 export interface SimulationResult {

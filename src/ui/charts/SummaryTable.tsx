@@ -96,6 +96,22 @@ export function SummaryTable() {
               </td>
             ))}
           </tr>
+          <tr className="border-b bg-gray-50">
+            <td className="py-2 px-3 text-gray-600">Total Rental Income</td>
+            {results.map((r) => (
+              <td key={r.scenarioId} className="text-right py-2 px-3 text-teal-700">
+                {r.summary.totalRentalIncome > 0 ? fmt(r.summary.totalRentalIncome) : '—'}
+              </td>
+            ))}
+          </tr>
+          <tr>
+            <td className="py-2 px-3 text-gray-600">Landlord Tax</td>
+            {results.map((r) => (
+              <td key={r.scenarioId} className="text-right py-2 px-3 text-red-600">
+                {r.summary.totalLandlordTax > 0 ? fmt(r.summary.totalLandlordTax) : '—'}
+              </td>
+            ))}
+          </tr>
         </tbody>
       </table>
     </div>

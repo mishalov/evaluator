@@ -116,6 +116,8 @@ export function buildCashFlowChartData(
     let maintenance = 0
     let rent = 0
     let cashContribution = 0
+    let rentalIncome = 0
+    let landlordTax = 0
 
     for (let m = y * 12 - 11; m <= y * 12; m++) {
       const p = monthly[m]
@@ -125,9 +127,11 @@ export function buildCashFlowChartData(
       maintenance += p.maintenance
       rent += p.rent
       cashContribution += p.cashContribution
+      rentalIncome += p.rentalIncome
+      landlordTax += p.landlordTax
     }
 
-    rows.push({ year: y, mortgagePI, propertyTax, maintenance, rent, cashContribution })
+    rows.push({ year: y, mortgagePI, propertyTax, maintenance, rent, cashContribution, rentalIncome, landlordTax })
   }
 
   return rows

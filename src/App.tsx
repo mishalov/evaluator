@@ -14,6 +14,7 @@ import { RealNominalToggle } from './ui/components/RealNominalToggle'
 import { CurrencyPicker } from './ui/components/CurrencyPicker'
 import { HorizonPicker } from './ui/components/HorizonPicker'
 import { ShareButton } from './ui/components/ShareButton'
+import { SavesButton } from './ui/components/SavesButton'
 import { ResetButton } from './ui/components/ResetButton'
 import { OfflineBadge } from './ui/components/OfflineBadge'
 
@@ -37,6 +38,7 @@ export default function App() {
           <RealNominalToggle />
           <CurrencyPicker />
           <ShareButton />
+          <SavesButton />
           <ResetButton />
         </div>
       </header>

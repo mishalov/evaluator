@@ -3,7 +3,7 @@
  *
  * Zod schemas for AppState validation and migration system.
  *
- * CURRENT_VERSION: 1
+ * CURRENT_VERSION: 2 (see the exported constant below — keep this comment in sync).
  * Migration format: migrations[n] transforms schema version n → n+1.
  *
  * On load from URL/localStorage: validate with zod, run migrations if needed.
@@ -12,7 +12,7 @@
 import { z } from 'zod'
 import type { AppState } from '../engine/types'
 
-export const CURRENT_VERSION = 1
+export const CURRENT_VERSION = 2
 
 // ---------------------------------------------------------------------------
 // Zod schemas (mirrors engine/types.ts domain model)
@@ -57,10 +57,32 @@ export const RentBlockSchema = z.object({
   referenceMonthlyPayment: z.number().min(0).optional(),
 })
 
+export const RentalPropertyBlockSchema = z.object({
+  kind: z.literal('rental'),
+  id: z.string(),
+  label: z.string(),
+  propertyValue: z.number().min(0),
+  downPayment: z.number().min(0),
+  annualInterestRate: z.number().min(0).max(1),
+  termYears: z.number().int().min(1).max(50),
+  appreciationRate: z.number().min(-0.5).max(1),
+  propertyTaxRate: z.number().min(0).max(0.5),
+  maintenanceRate: z.number().min(0).max(0.5),
+  monthlyRentIncome: z.number().min(0),
+  annualRentGrowth: z.number().min(-0.5).max(1),
+  vacancyRate: z.number().min(0).max(1),
+  expenseMethod: z.enum(['lumpSum30', 'actual']),
+  landlordTaxRate: z.number().min(0).max(1),
+  landlordTaxRateHigh: z.number().min(0).max(1),
+  landlordTaxThreshold: z.number().min(0),
+  annualDepreciation: z.number().min(0).optional(),
+})
+
 export const BlockSchema = z.discriminatedUnion('kind', [
   CashBlockSchema,
   MortgageBlockSchema,
   RentBlockSchema,
+  RentalPropertyBlockSchema,
 ])
 
 export const ScenarioSchema = z.object({
@@ -107,8 +129,11 @@ export type Migration = (state: Record<string, unknown>) => Record<string, unkno
  * Add new entries here as the schema evolves.
  */
 export const migrations: Record<number, Migration> = {
-  // Example: version 1 → 2 migration would go here
-  // 1: (state) => ({ ...state, newField: defaultValue, schemaVersion: 2 }),
+  // v1 → v2: added RentalPropertyBlock to the Block discriminated union.
+  // Existing states without a rental block are structurally compatible — no
+  // field transformation is required. The harness bumps schemaVersion after
+  // this no-op runs.
+  1: (s) => s,
 }
 
 /**

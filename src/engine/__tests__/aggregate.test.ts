@@ -9,6 +9,7 @@ import { simulate } from '../simulate'
 import {
   buildNetWorthChartData,
   buildNetWorthBreakdownData,
+  buildCashFlowChartData,
 } from '../aggregate'
 import type { Scenario } from '../types'
 
@@ -165,5 +166,86 @@ describe('buildNetWorthBreakdownData', () => {
     expect(rows[0].cashBalance).toBeLessThan(0)
     // Property equity should still be positive (down payment of 60k = 60k initial equity)
     expect(rows[0].propertyEquity).toBeGreaterThan(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// buildCashFlowChartData — rentalIncome and landlordTax fields
+// ---------------------------------------------------------------------------
+
+const LANDLORD_SCENARIO: Scenario = {
+  id: 'landlord-agg',
+  name: 'Landlord',
+  salary: { annualAmount: 0, growthRate: 0, incomeTaxRate: 0 },
+  blocks: [
+    {
+      kind: 'rental',
+      id: 'rnt',
+      label: 'Flat',
+      propertyValue: 7_500_000,
+      downPayment: 1_500_000,
+      annualInterestRate: 0.052,
+      termYears: 30,
+      appreciationRate: 0.04,
+      propertyTaxRate: 0.0005,
+      maintenanceRate: 0.01,
+      monthlyRentIncome: 28_000,
+      annualRentGrowth: 0.03,
+      vacancyRate: 0.05,
+      expenseMethod: 'lumpSum30',
+      landlordTaxRate: 0.15,
+      landlordTaxRateHigh: 0.23,
+      landlordTaxThreshold: 1_762_812,
+    },
+    {
+      kind: 'cash',
+      id: 'c',
+      label: 'Cash',
+      initialBalance: 2_000_000,
+      monthlyContribution: 0,
+      annualReturnRate: 0.05,
+      capitalGainsTaxRate: 0.15,
+    },
+  ],
+}
+
+describe('buildCashFlowChartData — rentalIncome and landlordTax', () => {
+  it('emits positive rentalIncome per year for a landlord scenario', () => {
+    const result = simulate(LANDLORD_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const chart = buildCashFlowChartData(result)
+
+    // Each year should have some rental income
+    for (const row of chart) {
+      expect(row.rentalIncome).toBeGreaterThan(0)
+    }
+  })
+
+  it('emits positive landlordTax in year 1 (tax settles at month 11)', () => {
+    const result = simulate(LANDLORD_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const chart = buildCashFlowChartData(result)
+
+    // Year 1 (months 1–12) includes the settlement at month 11 → tax > 0
+    expect(chart[0].landlordTax).toBeGreaterThan(0)
+  })
+
+  it('rentalIncome in chart equals sum of monthly rentalIncome for that year', () => {
+    const result = simulate(LANDLORD_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const chart = buildCashFlowChartData(result)
+
+    // Spot-check year 2 (months 13–24)
+    const expectedYear2RentalIncome = result.monthly
+      .slice(13, 25)
+      .reduce((sum, p) => sum + p.rentalIncome, 0)
+    expect(chart[1].rentalIncome).toBeCloseTo(expectedYear2RentalIncome, 4)
+  })
+
+  it('emits 0 rentalIncome and 0 landlordTax for a non-landlord scenario', () => {
+    const result = simulate(RENT_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    const chart = buildCashFlowChartData(result)
+
+    for (const row of chart) {
+      expect(row.rentalIncome).toBe(0)
+      expect(row.landlordTax).toBe(0)
+    }
   })
 })

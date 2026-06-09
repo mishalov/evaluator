@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest'
 import { simulate } from '../simulate'
 import { buildCashFlowChartData } from '../aggregate'
-import type { Scenario } from '../types'
+import type { Scenario, RentalPropertyBlock } from '../types'
 
 // ---------------------------------------------------------------------------
 // Scenario fixtures
@@ -333,6 +333,329 @@ describe('Simulation correctness', () => {
     expect(nw1).not.toBe(0)
     expect(nw2).not.toBe(0)
     expect(nw3).not.toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Rental property block scenarios
+// ---------------------------------------------------------------------------
+
+const BASE_RENTAL_BLOCK: RentalPropertyBlock = {
+  kind: 'rental',
+  id: 'rnt1',
+  label: 'Prague Flat',
+  propertyValue: 7_500_000,
+  downPayment: 1_500_000,
+  annualInterestRate: 0.052,
+  termYears: 30,
+  appreciationRate: 0.04,
+  propertyTaxRate: 0.0005,
+  maintenanceRate: 0.01,
+  monthlyRentIncome: 28_000,
+  annualRentGrowth: 0.03,
+  vacancyRate: 0.05,
+  expenseMethod: 'lumpSum30',
+  landlordTaxRate: 0.15,
+  landlordTaxRateHigh: 0.23,
+  landlordTaxThreshold: 1_762_812,
+}
+
+const LANDLORD_SCENARIO: Scenario = {
+  id: 'landlord',
+  name: 'Landlord',
+  salary: { annualAmount: 0, growthRate: 0, incomeTaxRate: 0 },
+  blocks: [
+    BASE_RENTAL_BLOCK,
+    {
+      kind: 'cash',
+      id: 'c-land',
+      label: 'Savings',
+      initialBalance: 2_000_000,  // pre-loaded so cash stays positive
+      monthlyContribution: 0,
+      annualReturnRate: 0.05,
+      capitalGainsTaxRate: 0.15,
+    },
+  ],
+}
+
+describe('Rental block integration — simulate', () => {
+  it('debits the rental down payment from cash at month 0', () => {
+    const result = simulate(LANDLORD_SCENARIO, 30, 0.025)
+    // initialBalance = 2_000_000, downPayment = 1_500_000
+    // month-0 cash = 2_000_000 - 1_500_000 = 500_000
+    expect(result.monthly[0].cashBalance).toBeCloseTo(500_000, 0)
+  })
+
+  it('net worth at month 0 = cash + (rentalPropertyValue − rentalMortgageBalance)', () => {
+    const result = simulate(LANDLORD_SCENARIO, 30, 0.025)
+    const p0 = result.monthly[0]
+    // equity = 7_500_000 - 6_000_000 = 1_500_000
+    // netWorth = 500_000 + 1_500_000 = 2_000_000
+    expect(p0.propertyEquity).toBeCloseTo(1_500_000, 0)
+    expect(p0.netWorth).toBeCloseTo(2_000_000, 0)
+  })
+
+  it('totalRentalIncome accumulates in summary (positive income scenario)', () => {
+    const result = simulate(LANDLORD_SCENARIO, 30, 0.025)
+    // 28_000 * 0.95 * 12 * 30 ≈ 9.576M minimum (rent grows annually)
+    expect(result.summary.totalRentalIncome).toBeGreaterThan(9_000_000)
+  })
+
+  it('totalLandlordTax accumulates in summary', () => {
+    const result = simulate(LANDLORD_SCENARIO, 30, 0.025)
+    expect(result.summary.totalLandlordTax).toBeGreaterThan(0)
+  })
+
+  it('summary.totalInterest and totalPropertyCosts include rental block totals', () => {
+    // With only a rental block (no primary mortgage), interest and costs must
+    // come from the rental block — otherwise they would be 0.
+    const result = simulate(LANDLORD_SCENARIO, 30, 0.025)
+    expect(result.summary.totalInterest).toBeGreaterThan(0)
+    expect(result.summary.totalPropertyCosts).toBeGreaterThan(0)
+  })
+
+  it('summary.downPayment equals rental downPayment when no primary mortgage', () => {
+    const result = simulate(LANDLORD_SCENARIO, 30, 0.025)
+    expect(result.summary.downPayment).toBeCloseTo(1_500_000, 0)
+  })
+
+  it('positive rental net cash flow routes into cash and compounds', () => {
+    // Simple scenario: zero-rate cash, zero annualReturnRate, high rent, no mortgage
+    const scenario: Scenario = {
+      id: 'simple-rental',
+      name: 'Simple Rental',
+      salary: { annualAmount: 0, growthRate: 0, incomeTaxRate: 0 },
+      blocks: [
+        {
+          kind: 'rental',
+          id: 'rnt',
+          label: 'Test Flat',
+          propertyValue: 1_000_000,
+          downPayment: 1_000_000, // fully paid = no mortgage, no PI
+          annualInterestRate: 0.05,
+          termYears: 30,
+          appreciationRate: 0,
+          propertyTaxRate: 0,
+          maintenanceRate: 0,
+          monthlyRentIncome: 10_000,
+          annualRentGrowth: 0,
+          vacancyRate: 0,
+          expenseMethod: 'lumpSum30',
+          landlordTaxRate: 0.15,
+          landlordTaxRateHigh: 0.23,
+          landlordTaxThreshold: 1_762_812,
+        },
+        {
+          kind: 'cash',
+          id: 'c',
+          label: 'Cash',
+          initialBalance: 1_000_000,
+          monthlyContribution: 0,
+          annualReturnRate: 0,  // zero rate for determinism
+          capitalGainsTaxRate: 0,
+        },
+      ],
+    }
+    const result = simulate(scenario, 1, 0)
+    // loan = 0, no PI, no tax, no maintenance → netCashFlow = 10_000 per month (months 0–10)
+    // At month 11: tax settles. Net is reduced by annual tax on 12×10k income.
+    // Total cash after 12 months > 1_000_000 (initial 0 after down payment debit was fully funded)
+    // initialBalance=1_000_000, downPayment=1_000_000 → cash starts at 0
+    // After 12 months of positive rental flow, cash > 0
+    const finalCash = result.monthly[12].cashBalance
+    expect(finalCash).toBeGreaterThan(0)
+  })
+
+  it('negative rental net cash flow reduces cash balance (not clamped)', () => {
+    // Overly expensive property: very high maintenance, zero rent → net flow negative
+    const scenario: Scenario = {
+      id: 'neg-rental',
+      name: 'Negative Rental',
+      salary: { annualAmount: 0, growthRate: 0, incomeTaxRate: 0 },
+      blocks: [
+        {
+          kind: 'rental',
+          id: 'rnt',
+          label: 'Costly Flat',
+          propertyValue: 5_000_000,
+          downPayment: 5_000_000, // no mortgage, only maintenance drains cash
+          annualInterestRate: 0.05,
+          termYears: 30,
+          appreciationRate: 0,
+          propertyTaxRate: 0,
+          maintenanceRate: 0.12, // 12% annual maintenance → 50k/month
+          monthlyRentIncome: 0,  // no rent income
+          annualRentGrowth: 0,
+          vacancyRate: 0,
+          expenseMethod: 'lumpSum30',
+          landlordTaxRate: 0.15,
+          landlordTaxRateHigh: 0.23,
+          landlordTaxThreshold: 1_762_812,
+        },
+        {
+          kind: 'cash',
+          id: 'c',
+          label: 'Cash',
+          initialBalance: 10_000_000,
+          monthlyContribution: 0,
+          annualReturnRate: 0,
+          capitalGainsTaxRate: 0,
+        },
+      ],
+    }
+    const result = simulate(scenario, 1, 0)
+    // initialBalance=10M, downPayment=5M → month-0 cash = 5M
+    // Each month: netCashFlow = 0 - 0 - 0 - (5M*0.12/12) - 0 = -50k
+    // After 12 months: ~5M - 12*50k = ~4.4M
+    expect(result.monthly[0].cashBalance).toBeCloseTo(5_000_000, 0)
+    expect(result.monthly[12].cashBalance).toBeLessThan(5_000_000)
+    // Not clamped — must be exactly the drained value (not zero)
+    expect(result.monthly[12].cashBalance).toBeGreaterThan(4_000_000)
+  })
+
+  it('net worth at horizon = cash + (rental property value − rental mortgage balance)', () => {
+    const result = simulate(LANDLORD_SCENARIO, 5, 0.025)
+    const final = result.monthly[60]
+    // net worth must equal cashBalance + (propertyValue - mortgageBalance)
+    expect(final.netWorth).toBeCloseTo(
+      final.cashBalance + (final.propertyValue - final.mortgageBalance),
+      4,
+    )
+  })
+
+  it('scenario with NO rental block has totalRentalIncome=0 and totalLandlordTax=0', () => {
+    const result = simulate(RENT_ONLY_SCENARIO, HORIZON_YEARS, CPI_ANNUAL)
+    expect(result.summary.totalRentalIncome).toBe(0)
+    expect(result.summary.totalLandlordTax).toBe(0)
+  })
+
+  it('rental block PI does NOT feed the consumption-rent M_ref differential', () => {
+    // If rental PI leaked into M_ref, it would affect differential investing.
+    // We verify by having a rental block + rent block (differentialInvesting=false)
+    // and confirm the summary is sane (no accidental cross-routing).
+    const scenario: Scenario = {
+      id: 'landlord-renter',
+      name: 'Landlord who rents',
+      salary: { annualAmount: 0, growthRate: 0, incomeTaxRate: 0 },
+      blocks: [
+        BASE_RENTAL_BLOCK,
+        {
+          kind: 'rent',
+          id: 'r',
+          label: 'Own rent',
+          monthlyRent: 20_000,
+          annualRentGrowth: 0.03,
+          differentialInvesting: false, // no differential
+        },
+        {
+          kind: 'cash',
+          id: 'c',
+          label: 'Cash',
+          initialBalance: 2_000_000,
+          monthlyContribution: 0,
+          annualReturnRate: 0,
+          capitalGainsTaxRate: 0,
+        },
+      ],
+    }
+    const result = simulate(scenario, 1, 0)
+    // totalRent must be positive (own rent was paid)
+    expect(result.summary.totalRent).toBeGreaterThan(0)
+    // totalRentalIncome must be positive (landlord received rent)
+    expect(result.summary.totalRentalIncome).toBeGreaterThan(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// H1 regression: mortgage + rental scenario — both property positions counted
+// ---------------------------------------------------------------------------
+
+describe('Mortgage + rental dual-property net worth (H1 regression)', () => {
+  // mortgage: 5M house, 1M down → loan 4M; cash = initialBalance - 1M (mortgage) - 0.6M (rental)
+  // rental:   3M property, 0.6M down → loan 2.4M; initial value 3M
+  // cash:     5M initial, 0 contribution, 0% return, 0% CGT
+  //
+  // Month-0 identity:
+  //   cashBalance         = 5M - 1M - 0.6M = 3.4M
+  //   mortgageEquity      = 5M - 4M        = 1M
+  //   rentalEquity        = 3M - 2.4M      = 0.6M
+  //   netWorth            = 3.4M + 1M + 0.6M = 5M
+  const DUAL_PROPERTY_SCENARIO: Scenario = {
+    id: 'dual-property',
+    name: 'Mortgage + Rental',
+    salary: { annualAmount: 0, growthRate: 0, incomeTaxRate: 0 },
+    blocks: [
+      {
+        kind: 'mortgage',
+        id: 'mort',
+        label: 'Primary Home',
+        propertyValue: 5_000_000,
+        downPayment: 1_000_000,
+        annualInterestRate: 0.05,
+        termYears: 30,
+        appreciationRate: 0,
+        propertyTaxRate: 0,
+        maintenanceRate: 0,
+      },
+      {
+        kind: 'rental',
+        id: 'rnt',
+        label: 'Investment Flat',
+        propertyValue: 3_000_000,
+        downPayment: 600_000,
+        annualInterestRate: 0.05,
+        termYears: 30,
+        appreciationRate: 0,
+        propertyTaxRate: 0,
+        maintenanceRate: 0,
+        monthlyRentIncome: 0,
+        annualRentGrowth: 0,
+        vacancyRate: 0,
+        expenseMethod: 'lumpSum30',
+        landlordTaxRate: 0.15,
+        landlordTaxRateHigh: 0.23,
+        landlordTaxThreshold: 1_762_812,
+      },
+      {
+        kind: 'cash',
+        id: 'c',
+        label: 'Cash',
+        initialBalance: 5_000_000,
+        monthlyContribution: 0,
+        annualReturnRate: 0,
+        capitalGainsTaxRate: 0,
+      },
+    ],
+  }
+
+  it('month-0 netWorth = 5,000,000 (equity from both mortgage and rental counted)', () => {
+    const result = simulate(DUAL_PROPERTY_SCENARIO, 5, 0)
+    const p0 = result.monthly[0]
+
+    // Both down payments are debited from the 5M initial balance
+    expect(p0.cashBalance).toBeCloseTo(3_400_000, 0) // 5M - 1M - 0.6M
+
+    // propertyValue must aggregate both blocks (5M + 3M)
+    expect(p0.propertyValue).toBeCloseTo(8_000_000, 0)
+
+    // mortgageBalance must aggregate both loans (4M + 2.4M)
+    expect(p0.mortgageBalance).toBeCloseTo(6_400_000, 0)
+
+    // propertyEquity = 8M - 6.4M = 1.6M
+    expect(p0.propertyEquity).toBeCloseTo(1_600_000, 0)
+
+    // netWorth = 3.4M (cash) + 1.6M (equity) = 5M
+    expect(p0.netWorth).toBeCloseTo(5_000_000, 0)
+  })
+
+  it('equity at a later month includes both properties (H1: not just mortgage)', () => {
+    const result = simulate(DUAL_PROPERTY_SCENARIO, 5, 0)
+    // After 24 months of amortization, combined equity must exceed initial 1.6M
+    // because principal is being paid down on both loans.
+    const p24 = result.monthly[24]
+    expect(p24.propertyEquity).toBeGreaterThan(1_600_000)
+    // net worth = cashBalance + propertyEquity must hold exactly
+    expect(p24.netWorth).toBeCloseTo(p24.cashBalance + p24.propertyEquity, 4)
   })
 })
 

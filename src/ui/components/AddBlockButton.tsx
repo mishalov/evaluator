@@ -7,6 +7,7 @@ import { useState } from 'react'
 import type { BlockKind } from '../../engine/types'
 import { useEvaluatorStore } from '../../state/store'
 import type { Block } from '../../engine/types'
+import { DEFAULT_RENTAL_BLOCK } from '../../state/store'
 
 interface Props {
   scenarioId: string
@@ -33,6 +34,12 @@ function makeDefaultBlock(kind: BlockKind, id: string): Block {
         kind: 'rent', id, label: 'Monthly Rent',
         monthlyRent: 2_000, annualRentGrowth: 0.03,
         differentialInvesting: false,
+      }
+    case 'rental':
+      return {
+        ...DEFAULT_RENTAL_BLOCK,
+        id,
+        label: 'Rental Property',
       }
   }
 }
@@ -65,6 +72,9 @@ export function AddBlockButton({ scenarioId }: Props) {
           </button>
           <button onClick={() => add('rent')} className="block w-full text-left px-4 py-2 hover:bg-gray-50">
             Rent
+          </button>
+          <button onClick={() => add('rental')} className="block w-full text-left px-4 py-2 hover:bg-gray-50">
+            Rental Property
           </button>
         </div>
       )}

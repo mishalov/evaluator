@@ -13,11 +13,43 @@
  */
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
-import type { AppState, Block, Scenario, SimulationResult, MarketData } from '../engine/types'
+import type { AppState, Block, Scenario, SimulationResult, MarketData, RentalPropertyBlock } from '../engine/types'
 import { simulate } from '../engine/simulate'
 import { CURRENT_VERSION } from './schema'
 import { readFromHash, writeToHash } from './url'
 import { saveToLocalStorage, loadFromLocalStorage, clearLocalStorage } from './persistence'
+import * as saves from './saves'
+import type { SaveResult, LoadResult } from './saves'
+
+// ---------------------------------------------------------------------------
+// Block factory helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Prague-market defaults for a rental property block (Czech §9, 2026).
+ * Money fields (propertyValue, downPayment, monthlyRentIncome) are provided
+ * as meaningful Prague defaults here; the UI "zeroed preset" in DEFAULT_STATE
+ * overrides them to 0 so users see blank fields on first load.
+ */
+export const DEFAULT_RENTAL_BLOCK: RentalPropertyBlock = {
+  kind: 'rental',
+  id: 'rnt1',
+  label: 'Rental Property',
+  propertyValue: 7_500_000,
+  downPayment: 1_500_000,
+  annualInterestRate: 0.052,
+  termYears: 30,
+  appreciationRate: 0.04,
+  propertyTaxRate: 0.0005,
+  maintenanceRate: 0.01,
+  monthlyRentIncome: 28_000,
+  annualRentGrowth: 0.03,
+  vacancyRate: 0.05,
+  expenseMethod: 'lumpSum30',
+  landlordTaxRate: 0.15,
+  landlordTaxRateHigh: 0.23,
+  landlordTaxThreshold: 1_762_812,
+}
 
 // ---------------------------------------------------------------------------
 // Default state
@@ -79,6 +111,56 @@ export const DEFAULT_STATE: AppState = {
           initialBalance: 0,
           monthlyContribution: 0,
           annualReturnRate: 0.05,
+          capitalGainsTaxRate: 0.15,
+        },
+      ],
+    },
+    {
+      id: 'scenario-3',
+      name: 'Landlord + Rent & Invest',
+      // Salary zeroed — same convention as the other two presets.
+      salary: { annualAmount: 0, growthRate: 0.02, incomeTaxRate: 0.25 },
+      blocks: [
+        {
+          // Rental property block — money fields zeroed per preset convention.
+          // Rates and method fields retain realistic Prague/Czech defaults so
+          // users only need to fill in the CZK amounts.
+          kind: 'rental',
+          id: 'rnt1',
+          label: 'Rental Property',
+          propertyValue: 0,
+          downPayment: 0,
+          annualInterestRate: DEFAULT_RENTAL_BLOCK.annualInterestRate,
+          termYears: DEFAULT_RENTAL_BLOCK.termYears,
+          appreciationRate: DEFAULT_RENTAL_BLOCK.appreciationRate,
+          propertyTaxRate: DEFAULT_RENTAL_BLOCK.propertyTaxRate,
+          maintenanceRate: DEFAULT_RENTAL_BLOCK.maintenanceRate,
+          monthlyRentIncome: 0,
+          annualRentGrowth: DEFAULT_RENTAL_BLOCK.annualRentGrowth,
+          vacancyRate: DEFAULT_RENTAL_BLOCK.vacancyRate,
+          expenseMethod: DEFAULT_RENTAL_BLOCK.expenseMethod,
+          landlordTaxRate: DEFAULT_RENTAL_BLOCK.landlordTaxRate,
+          landlordTaxRateHigh: DEFAULT_RENTAL_BLOCK.landlordTaxRateHigh,
+          landlordTaxThreshold: DEFAULT_RENTAL_BLOCK.landlordTaxThreshold,
+        },
+        {
+          // Consumption rent (the landlord also lives somewhere else).
+          // differentialInvesting: false — landlord's net cash flow already
+          // routes into the cash block; no separate differential needed.
+          kind: 'rent',
+          id: 'r3',
+          label: 'Own Rent',
+          monthlyRent: 0,
+          annualRentGrowth: 0.03,
+          differentialInvesting: false,
+        },
+        {
+          kind: 'cash',
+          id: 'c3',
+          label: 'Investment Account',
+          initialBalance: 0,
+          monthlyContribution: 0,
+          annualReturnRate: 0.07,
           capitalGainsTaxRate: 0.15,
         },
       ],
@@ -175,6 +257,13 @@ export interface EvaluatorStore {
   setInflationOverride: (pct: number | undefined) => void
   setMarketData: (data: MarketData) => void
   resetToDefaults: () => void
+
+  // Named saves actions
+  saveCurrentAs: (name: string) => SaveResult
+  overwriteSave: (id: string) => SaveResult
+  loadSave: (id: string) => LoadResult
+  renameSave: (id: string, name: string) => SaveResult
+  deleteSave: (id: string) => boolean
 
   // Selectors (computed)
   getSimulation: (scenarioId: string) => SimulationResult | null
@@ -312,8 +401,32 @@ export const useEvaluatorStore = create<EvaluatorStore>()(
 
     resetToDefaults: () => {
       clearLocalStorage()
+      // NOTE: intentionally does NOT touch the 'evaluator:saves' namespace.
+      // Named saves survive a reset — that is the documented contract.
       set({ appState: DEFAULT_STATE })
     },
+
+    // ----- Named saves -----
+
+    saveCurrentAs: (name) => saves.createSave(name, get().appState),
+
+    overwriteSave: (id) => saves.updateSave(id, get().appState),
+
+    loadSave: (id) => {
+      const save = saves.getSave(id)
+      if (!save) return { ok: false, error: 'not-found' }
+
+      const state = saves.decodeSave(save.encoded)
+      if (!state) return { ok: false, error: 'corrupt' }
+
+      // Route through setAppState so the subscription writes hash + localStorage for free.
+      get().setAppState(state)
+      return { ok: true, state }
+    },
+
+    renameSave: (id, name) => saves.renameSave(id, name),
+
+    deleteSave: (id) => saves.deleteSave(id),
 
     // ----- Selectors -----
 

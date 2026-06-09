@@ -13,7 +13,7 @@
  * A 3-scenario state typically compresses to 300-500 chars.
  */
 import LZString from 'lz-string'
-import type { AppState, Block, CashBlock, MortgageBlock, RentBlock, Scenario, SalaryConfig } from '../engine/types'
+import type { AppState, Block, CashBlock, MortgageBlock, RentBlock, RentalPropertyBlock, Scenario, SalaryConfig } from '../engine/types'
 import { CURRENT_VERSION, validateAndMigrate } from './schema'
 
 // ---------------------------------------------------------------------------
@@ -32,7 +32,17 @@ interface SRentBlock {
   k: 'rent'; id: string; lb: string
   r: number; rg: number; di: boolean; rp?: number
 }
-type SBlock = SCashBlock | SMortgageBlock | SRentBlock
+/**
+ * Serialised rental-property block.
+ * Short key: 'rnt' — distinct from the consumption rent block's key 'rent'.
+ */
+interface SRentalPropertyBlock {
+  k: 'rnt'; id: string; lb: string
+  pv: number; dp: number; ai: number; ty: number; apr: number
+  pt: number; mr: number; ri: number; rg: number; vr: number
+  em: string; lt: number; lth: number; ltt: number; ad?: number
+}
+type SBlock = SCashBlock | SMortgageBlock | SRentBlock | SRentalPropertyBlock
 
 interface SSalary {
   a: number; g: number; t: number
@@ -69,6 +79,17 @@ function encodeBlock(block: Block): SBlock {
       di: block.differentialInvesting,
       ...(block.referenceMonthlyPayment !== undefined ? { rp: block.referenceMonthlyPayment } : {}),
     }
+    case 'rental': return {
+      k: 'rnt', id: block.id, lb: block.label,
+      pv: block.propertyValue, dp: block.downPayment,
+      ai: block.annualInterestRate, ty: block.termYears,
+      apr: block.appreciationRate, pt: block.propertyTaxRate,
+      mr: block.maintenanceRate, ri: block.monthlyRentIncome,
+      rg: block.annualRentGrowth, vr: block.vacancyRate,
+      em: block.expenseMethod, lt: block.landlordTaxRate,
+      lth: block.landlordTaxRateHigh, ltt: block.landlordTaxThreshold,
+      ...(block.annualDepreciation !== undefined ? { ad: block.annualDepreciation } : {}),
+    } satisfies SRentalPropertyBlock
   }
 }
 
@@ -127,6 +148,21 @@ function decodeBlock(sb: SBlock): Block {
         differentialInvesting: b.di,
         ...(b.rp !== undefined ? { referenceMonthlyPayment: b.rp } : {}),
       } satisfies RentBlock
+    }
+    case 'rnt': {
+      const b = sb as SRentalPropertyBlock
+      return {
+        kind: 'rental', id: b.id, label: b.lb,
+        propertyValue: b.pv, downPayment: b.dp,
+        annualInterestRate: b.ai, termYears: b.ty,
+        appreciationRate: b.apr, propertyTaxRate: b.pt,
+        maintenanceRate: b.mr, monthlyRentIncome: b.ri,
+        annualRentGrowth: b.rg, vacancyRate: b.vr,
+        expenseMethod: b.em as RentalPropertyBlock['expenseMethod'],
+        landlordTaxRate: b.lt, landlordTaxRateHigh: b.lth,
+        landlordTaxThreshold: b.ltt,
+        ...(b.ad !== undefined ? { annualDepreciation: b.ad } : {}),
+      } satisfies RentalPropertyBlock
     }
   }
 }
